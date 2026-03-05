@@ -15,6 +15,20 @@ export interface RecommendationRunRecord {
   createdAt: string;
 }
 
+export interface DoubanBaselineSongInput {
+  songId: string;
+  artist: string;
+  tags: string[];
+}
+
+export interface NeteaseEventInput {
+  idempotencyKey: string;
+  eventId: string;
+  songId: string;
+  actionType: string;
+  actionTime: number;
+}
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const schemaPath = join(__dirname, "schema.sql");
 
@@ -55,5 +69,51 @@ export class DbClient {
 
   close(): void {
     this.db.close();
+  }
+
+  upsertDoubanBaselineSong(input: DoubanBaselineSongInput): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO douban_baseline_songs (song_id, artist, tags)
+      VALUES (?, ?, ?)
+      ON CONFLICT(song_id) DO UPDATE SET
+        artist = excluded.artist,
+        tags = excluded.tags,
+        updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    `);
+    stmt.run(input.songId, input.artist, JSON.stringify(input.tags));
+  }
+
+  countDoubanBaselineSongs(): number {
+    const stmt = this.db.prepare(`
+      SELECT COUNT(*) AS total
+      FROM douban_baseline_songs
+    `);
+    const row = stmt.get() as { total: number };
+    return row.total;
+  }
+
+  insertNeteaseEvent(input: NeteaseEventInput): boolean {
+    const stmt = this.db.prepare(`
+      INSERT INTO netease_events (idempotency_key, event_id, song_id, action_type, action_time)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(idempotency_key) DO NOTHING
+    `);
+    const result = stmt.run(
+      input.idempotencyKey,
+      input.eventId,
+      input.songId,
+      input.actionType,
+      input.actionTime
+    );
+    return result.changes > 0;
+  }
+
+  countNeteaseEvents(): number {
+    const stmt = this.db.prepare(`
+      SELECT COUNT(*) AS total
+      FROM netease_events
+    `);
+    const row = stmt.get() as { total: number };
+    return row.total;
   }
 }
