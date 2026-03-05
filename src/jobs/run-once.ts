@@ -56,10 +56,11 @@ export async function runOnceLiveDryRun(
   const recentSongIds = Array.from(
     new Set(response.events.map((event) => event.songId))
   );
+  const longTermSongIds = input.longTermSongIds ?? [];
 
   const mixed = mixCandidates({
     recentSongIds,
-    longTermSongIds: input.longTermSongIds,
+    longTermSongIds,
     recentWeight: 0.6,
     longTermWeight: 0.4
   });

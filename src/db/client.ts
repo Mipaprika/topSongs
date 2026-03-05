@@ -99,7 +99,8 @@ export class DbClient {
       ORDER BY updated_at DESC
       LIMIT ?
     `);
-    return stmt.all(limit).map((row: { songId: string }) => row.songId);
+    const rows = stmt.all(limit) as Array<{ songId: string }>;
+    return rows.map((row) => row.songId);
   }
 
   insertNeteaseEvent(input: NeteaseEventInput): boolean {
