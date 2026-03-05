@@ -1,4 +1,5 @@
 import { recommendSongs } from "../recommendation/recommender";
+import { mixCandidates } from "../recommendation/mixer";
 import type { NeteaseIncrementalProvider } from "../ingest/netease-incremental";
 
 export interface RunOnceResult {
@@ -32,6 +33,7 @@ export interface RunOnceLiveDryRunInput {
   incrementalProvider: NeteaseIncrementalProvider;
   cursor: string;
   limit: number;
+  longTermSongIds: string[];
 }
 
 export interface RunOnceLiveDryRunResult {
@@ -49,15 +51,22 @@ export async function runOnceLiveDryRun(
   const limit = input.limit ?? 20;
   const response = await input.incrementalProvider.fetchSince(cursor);
 
-  const uniqueSongIds = Array.from(
+  const recentSongIds = Array.from(
     new Set(response.events.map((event) => event.songId))
   );
 
-  const candidates = uniqueSongIds.map((songId, index) => ({
-    songId,
-    shortTermSimilarity: 0.8 - index * 0.01,
-    longTermSimilarity: 0.7 - index * 0.01,
-    freshness: 0.5,
+  const mixed = mixCandidates({
+    recentSongIds,
+    longTermSongIds: input.longTermSongIds,
+    recentWeight: 0.6,
+    longTermWeight: 0.4
+  });
+
+  const candidates = mixed.map((candidate, index) => ({
+    songId: candidate.songId,
+    shortTermSimilarity: candidate.recentWeight,
+    longTermSimilarity: candidate.longTermWeight,
+    freshness: 0.5 - index * 0.001,
     diversity: 0.4
   }));
 

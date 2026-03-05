@@ -20,7 +20,8 @@ describe("runOnceLiveDryRun", () => {
     const result = await runOnceLiveDryRun({
       incrementalProvider,
       cursor: "1000",
-      limit: 2
+      limit: 2,
+      longTermSongIds: []
     });
 
     expect(result.events).toBe(3);
@@ -28,5 +29,26 @@ describe("runOnceLiveDryRun", () => {
     expect(result.selectedCount).toBe(2);
     expect(result.songIds).toEqual(["s1", "s2"]);
     expect(result.nextCursor).toBe("1200");
+  });
+
+  it("falls back to long-term only when no recent events", async () => {
+    const incrementalProvider = {
+      async fetchSince() {
+        return {
+          nextCursor: "1",
+          events: []
+        };
+      }
+    };
+
+    const result = await runOnceLiveDryRun({
+      incrementalProvider,
+      cursor: "0",
+      limit: 20,
+      longTermSongIds: ["l1", "l2", "l3"]
+    });
+
+    expect(result.selectedCount).toBe(3);
+    expect(result.songIds).toEqual(["l1", "l2", "l3"]);
   });
 });
