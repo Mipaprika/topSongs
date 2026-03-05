@@ -1,5 +1,6 @@
 import { recommendSongs } from "../recommendation/recommender";
 import { mixCandidates } from "../recommendation/mixer";
+import { fillWithExploration } from "../recommendation/exploration";
 import type { NeteaseIncrementalProvider } from "../ingest/netease-incremental";
 
 export interface RunOnceResult {
@@ -34,6 +35,7 @@ export interface RunOnceLiveDryRunInput {
   cursor: string;
   limit: number;
   longTermSongIds: string[];
+  explorationSongIds?: string[];
 }
 
 export interface RunOnceLiveDryRunResult {
@@ -79,11 +81,13 @@ export async function runOnceLiveDryRun(
     limit
   });
 
+  const filled = fillWithExploration(picks, input.explorationSongIds ?? [], limit);
+
   return {
-    selectedCount: picks.length,
+    selectedCount: filled.length,
     candidates: candidates.length,
     events: response.events.length,
     nextCursor: response.nextCursor,
-    songIds: picks
+    songIds: filled
   };
 }

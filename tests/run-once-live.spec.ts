@@ -51,4 +51,26 @@ describe("runOnceLiveDryRun", () => {
     expect(result.selectedCount).toBe(3);
     expect(result.songIds).toEqual(["l1", "l2", "l3"]);
   });
+
+  it("fills with exploration pool when candidates不足", async () => {
+    const incrementalProvider = {
+      async fetchSince() {
+        return {
+          nextCursor: "1",
+          events: []
+        };
+      }
+    };
+
+    const result = await runOnceLiveDryRun({
+      incrementalProvider,
+      cursor: "0",
+      limit: 3,
+      longTermSongIds: ["l1"],
+      explorationSongIds: ["e1", "e2"]
+    });
+
+    expect(result.selectedCount).toBe(3);
+    expect(result.songIds).toEqual(["l1", "e1", "e2"]);
+  });
 });
