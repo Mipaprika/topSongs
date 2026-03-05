@@ -9,4 +9,9 @@ describe("runCli", () => {
     expect(out).toContain("douban-sync");
     expect(out).toContain("run-once");
   });
+
+  it("prints selectedCount=20 for run-once --dry-run", async () => {
+    const out = await runCli(["run-once", "--dry-run"]);
+    expect(out).toContain("selectedCount=20");
+  });
 });

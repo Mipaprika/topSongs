@@ -1,3 +1,5 @@
+import { runOnceDryRun } from "./jobs/run-once";
+
 const HELP_TEXT = `
 Usage: top-songs <command>
 
@@ -8,7 +10,7 @@ Commands:
 `;
 
 export async function runCli(args: string[]): Promise<string> {
-  const [command] = args;
+  const [command, ...flags] = args;
 
   if (!command || command === "--help" || command === "-h") {
     return HELP_TEXT.trim();
@@ -20,6 +22,10 @@ export async function runCli(args: string[]): Promise<string> {
     case "douban-sync":
       return "douban-sync started";
     case "run-once":
+      if (flags.includes("--dry-run")) {
+        const result = runOnceDryRun();
+        return `run-once dry-run completed: selectedCount=${result.selectedCount}`;
+      }
       return "run-once started";
     default:
       return `Unknown command: ${command}\n\n${HELP_TEXT.trim()}`;

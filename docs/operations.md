@@ -7,12 +7,12 @@
 ## Bootstrap
 
 1. Install deps: `npm install`
-2. Start QR login bootstrap: `node dist/index.js bootstrap-login`
-3. Run one-time Douban import: `node dist/index.js douban-sync`
+2. Start QR login bootstrap: `npm run bootstrap-login`
+3. Run one-time Douban import: `npm run douban-sync`
 
 ## Daily Run
 
-- Execute daily job manually: `node dist/index.js run-once`
+- Execute daily job manually: `npm run run-once`
 - Run with scheduler on server (cron/systemd timer)
 
 ## Auth Expiry

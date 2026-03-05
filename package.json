@@ -6,10 +6,14 @@
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.json",
+    "bootstrap-login": "tsx src/index.ts bootstrap-login",
+    "douban-sync": "tsx src/index.ts douban-sync",
+    "run-once": "tsx src/index.ts run-once"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "tsx": "^4.21.0",
     "typescript": "^5.8.2",
     "vitest": "^3.2.4"
   }
