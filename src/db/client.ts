@@ -92,6 +92,16 @@ export class DbClient {
     return row.total;
   }
 
+  listDoubanBaselineSongs(limit: number): string[] {
+    const stmt = this.db.prepare(`
+      SELECT song_id AS songId
+      FROM douban_baseline_songs
+      ORDER BY updated_at DESC
+      LIMIT ?
+    `);
+    return stmt.all(limit).map((row: { songId: string }) => row.songId);
+  }
+
   insertNeteaseEvent(input: NeteaseEventInput): boolean {
     const stmt = this.db.prepare(`
       INSERT INTO netease_events (idempotency_key, event_id, song_id, action_type, action_time)
