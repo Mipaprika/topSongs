@@ -1,11 +1,13 @@
-import { runOnceDryRun } from "./jobs/run-once";
+import { runOnceDryRun, runOnceLiveDryRun } from "./jobs/run-once";
 import { NeteaseApiClient } from "./providers/netease/api-client";
+import { createNeteaseLiveAdapters } from "./providers/netease/live-adapters";
 
 type NeteaseBootstrapApi = Pick<NeteaseApiClient, "createQrLogin" | "checkQrLogin">;
 
 export interface CliDeps {
   env?: NodeJS.ProcessEnv;
   createNeteaseApiClient?: (baseUrl: string) => NeteaseBootstrapApi;
+  runOnceLiveDryRun?: typeof runOnceLiveDryRun;
 }
 
 const HELP_TEXT = `
@@ -26,6 +28,7 @@ export async function runCli(args: string[], deps: CliDeps = {}): Promise<string
       new NeteaseApiClient({
         baseUrl
       }));
+  const runLiveDryRun = deps.runOnceLiveDryRun ?? runOnceLiveDryRun;
 
   if (!command || command === "--help" || command === "-h") {
     return HELP_TEXT.trim();
@@ -52,6 +55,26 @@ export async function runCli(args: string[], deps: CliDeps = {}): Promise<string
       return "douban-sync started";
     case "run-once":
       if (flags.includes("--dry-run")) {
+        const baseUrl = env.NETEASE_API_BASE_URL;
+        const cookie = env.NETEASE_COOKIE;
+        if (baseUrl && cookie) {
+          const adapters = createNeteaseLiveAdapters({
+            session: {
+              getCookie: () => cookie
+            },
+            apiClientOptions: {
+              baseUrl
+            }
+          });
+          const cursor = env.NETEASE_EVENT_CURSOR ?? "0";
+          const result = await runLiveDryRun({
+            incrementalProvider: adapters.incrementalProvider,
+            cursor,
+            limit: 20
+          });
+          return `run-once dry-run completed: selectedCount=${result.selectedCount} events=${result.events} candidates=${result.candidates} nextCursor=${result.nextCursor}`;
+        }
+
         const result = runOnceDryRun();
         return `run-once dry-run completed: selectedCount=${result.selectedCount}`;
       }

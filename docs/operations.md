@@ -6,6 +6,7 @@
 - `NETEASE_API_BASE_URL`: NeteaseCloudMusicApi endpoint
 - `NETEASE_PLAYLIST_ID`: fixed playlist id for daily replacement
 - `NETEASE_COOKIE`: login cookie (updated after QR login success)
+- `NETEASE_EVENT_CURSOR`: last cursor for incremental events (default `0`)
 
 ## Bootstrap
 
@@ -21,6 +22,7 @@
 
 - Execute daily job manually: `npm run run-once`
 - Run with scheduler on server (cron/systemd timer)
+- Dry-run with real data uses `NETEASE_COOKIE` and `NETEASE_API_BASE_URL` when set
 
 ## Auth Expiry
 

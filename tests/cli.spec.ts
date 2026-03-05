@@ -15,6 +15,25 @@ describe("runCli", () => {
     expect(out).toContain("selectedCount=20");
   });
 
+  it("uses live dry run when cookie is available", async () => {
+    const out = await runCli(["run-once", "--dry-run"], {
+      env: {
+        NETEASE_API_BASE_URL: "http://localhost:3000",
+        NETEASE_COOKIE: "MUSIC_U=live"
+      } as NodeJS.ProcessEnv,
+      runOnceLiveDryRun: async () => ({
+        selectedCount: 3,
+        candidates: 3,
+        events: 3,
+        nextCursor: "1200",
+        songIds: ["s1", "s2", "s3"]
+      })
+    });
+
+    expect(out).toContain("selectedCount=3");
+    expect(out).toContain("events=3");
+  });
+
   it("returns qr payload for bootstrap-login", async () => {
     const out = await runCli(["bootstrap-login"], {
       createNeteaseApiClient: () => ({
