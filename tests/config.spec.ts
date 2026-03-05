@@ -9,4 +9,15 @@ describe("loadConfig", () => {
       } as NodeJS.ProcessEnv)
     ).toThrow(/MASTER_KEY/);
   });
+
+  it("loads netease api config with sane defaults", () => {
+    const config = loadConfig({
+      MASTER_KEY: "key",
+      NETEASE_API_BASE_URL: "https://ncm.example.com",
+      NETEASE_PLAYLIST_ID: "playlist-1"
+    } as NodeJS.ProcessEnv);
+
+    expect(config.neteaseApiBaseUrl).toBe("https://ncm.example.com");
+    expect(config.neteasePlaylistId).toBe("playlist-1");
+  });
 });

@@ -1,4 +1,12 @@
 import { runOnceDryRun } from "./jobs/run-once";
+import { NeteaseApiClient } from "./providers/netease/api-client";
+
+type NeteaseBootstrapApi = Pick<NeteaseApiClient, "createQrLogin" | "checkQrLogin">;
+
+export interface CliDeps {
+  env?: NodeJS.ProcessEnv;
+  createNeteaseApiClient?: (baseUrl: string) => NeteaseBootstrapApi;
+}
 
 const HELP_TEXT = `
 Usage: top-songs <command>
@@ -9,16 +17,37 @@ Commands:
   run-once          Execute one daily recommendation run
 `;
 
-export async function runCli(args: string[]): Promise<string> {
+export async function runCli(args: string[], deps: CliDeps = {}): Promise<string> {
   const [command, ...flags] = args;
+  const env = deps.env ?? process.env;
+  const createNeteaseApiClient =
+    deps.createNeteaseApiClient ??
+    ((baseUrl: string) =>
+      new NeteaseApiClient({
+        baseUrl
+      }));
 
   if (!command || command === "--help" || command === "-h") {
     return HELP_TEXT.trim();
   }
 
   switch (command) {
-    case "bootstrap-login":
-      return "bootstrap-login started";
+    case "bootstrap-login": {
+      const baseUrl = env.NETEASE_API_BASE_URL ?? "http://127.0.0.1:3000";
+      const api = createNeteaseApiClient(baseUrl);
+      const unikey = readFlagValue(flags, "--check");
+
+      if (unikey) {
+        const status = await api.checkQrLogin(unikey);
+        if (status.status === "AUTHORIZED") {
+          return `qr-status=AUTHORIZED cookie=${status.cookie}`;
+        }
+        return `qr-status=${status.status}`;
+      }
+
+      const payload = await api.createQrLogin();
+      return `unikey=${payload.unikey}\nqrurl=${payload.qrurl}`;
+    }
     case "douban-sync":
       return "douban-sync started";
     case "run-once":
@@ -30,4 +59,12 @@ export async function runCli(args: string[]): Promise<string> {
     default:
       return `Unknown command: ${command}\n\n${HELP_TEXT.trim()}`;
   }
+}
+
+function readFlagValue(flags: string[], flag: string): string | null {
+  const index = flags.indexOf(flag);
+  if (index === -1) {
+    return null;
+  }
+  return flags[index + 1] ?? null;
 }

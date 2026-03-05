@@ -9,6 +9,12 @@ npm install
 cp .env.example .env
 ```
 
+Required `.env` fields for Netease integration:
+
+- `NETEASE_API_BASE_URL`: your NeteaseCloudMusicApi service URL (for example `http://127.0.0.1:3000`)
+- `NETEASE_PLAYLIST_ID`: target fixed playlist id
+- `NETEASE_COOKIE`: initial cookie after QR login
+
 ## Commands
 
 ```bash
@@ -27,11 +33,12 @@ npm run run-once -- --dry-run
 
 ## Verification (2026-03-05)
 
-- `npm test`: PASS (10 files, 13 tests)
+- `npm test`: PASS (14 files, 21 tests)
 - `npm run typecheck`: PASS
 - `npm run run-once -- --dry-run`: output contains `selectedCount=20`
 
 ## Known Limitations
 
-- Netease and Douban providers are adapter skeletons; real API endpoint binding and retry/backoff policy still need to be completed.
+- Douban data source is still placeholder (no real export parser/connector yet).
+- Netease incremental event classification currently uses heuristics from event text.
 - SQLite currently uses `node:sqlite` (experimental in Node 24).

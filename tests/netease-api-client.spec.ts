@@ -1,0 +1,82 @@
+import { describe, expect, it } from "vitest";
+
+import { NeteaseApiClient } from "../src/providers/netease/api-client";
+
+function jsonResponse(body: unknown, init?: ResponseInit): Response {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: {
+      "content-type": "application/json"
+    },
+    ...init
+  });
+}
+
+describe("NeteaseApiClient", () => {
+  it("creates qr login payload from key + create endpoints", async () => {
+    const calls: string[] = [];
+    const fetchFn: typeof fetch = async (input) => {
+      const url = String(input);
+      calls.push(url);
+
+      if (url.includes("/login/qr/key")) {
+        return jsonResponse({
+          code: 200,
+          data: { unikey: "k123" }
+        });
+      }
+
+      if (url.includes("/login/qr/create")) {
+        return jsonResponse({
+          code: 200,
+          data: {
+            qrurl: "https://music.163.com/login?codekey=k123",
+            qrimg: "data:image/png;base64,abc"
+          }
+        });
+      }
+
+      throw new Error(`unexpected url: ${url}`);
+    };
+
+    const client = new NeteaseApiClient({
+      baseUrl: "https://ncm.example.com",
+      fetchFn
+    });
+
+    const result = await client.createQrLogin();
+
+    expect(result).toEqual({
+      unikey: "k123",
+      qrurl: "https://music.163.com/login?codekey=k123",
+      qrimg: "data:image/png;base64,abc"
+    });
+    expect(calls[0]).toContain("/login/qr/key");
+    expect(calls[1]).toContain("/login/qr/create");
+  });
+
+  it("refreshes cookie and reads set-cookie header", async () => {
+    const fetchFn: typeof fetch = async (input) => {
+      const url = String(input);
+      expect(url).toContain("/login/refresh");
+
+      return jsonResponse(
+        { code: 200 },
+        {
+          headers: {
+            "content-type": "application/json",
+            "set-cookie": "MUSIC_U=next-cookie; Path=/; HttpOnly"
+          }
+        }
+      );
+    };
+
+    const client = new NeteaseApiClient({
+      baseUrl: "https://ncm.example.com",
+      fetchFn
+    });
+
+    const cookie = await client.refreshCookie("MUSIC_U=old-cookie");
+    expect(cookie).toContain("MUSIC_U=next-cookie");
+  });
+});

@@ -3,12 +3,19 @@
 ## Environment
 
 - `MASTER_KEY`: encryption key for credential store
+- `NETEASE_API_BASE_URL`: NeteaseCloudMusicApi endpoint
+- `NETEASE_PLAYLIST_ID`: fixed playlist id for daily replacement
+- `NETEASE_COOKIE`: login cookie (updated after QR login success)
 
 ## Bootstrap
 
 1. Install deps: `npm install`
-2. Start QR login bootstrap: `npm run bootstrap-login`
-3. Run one-time Douban import: `npm run douban-sync`
+2. Start QR login bootstrap and get QR URL:
+   - `npm run bootstrap-login`
+3. Poll login status after scan:
+   - `npm run bootstrap-login -- --check <unikey>`
+4. Persist returned cookie to `NETEASE_COOKIE`
+5. Run one-time Douban import: `npm run douban-sync`
 
 ## Daily Run
 

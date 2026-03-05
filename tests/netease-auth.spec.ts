@@ -25,4 +25,35 @@ describe("NeteaseAuthClient", () => {
       cookie: "MUSIC_U=next"
     });
   });
+
+  it("delegates qr login creation and check", async () => {
+    const client = new NeteaseAuthClient({
+      async createQrLogin() {
+        return {
+          unikey: "u1",
+          qrurl: "https://music.163.com/login?codekey=u1",
+          qrimg: "data:image/png;base64,qr"
+        };
+      },
+      async checkQrLogin(unikey: string) {
+        expect(unikey).toBe("u1");
+        return {
+          status: "AUTHORIZED" as const,
+          cookie: "MUSIC_U=ok"
+        };
+      },
+      async refreshCookie() {
+        return "MUSIC_U=next";
+      }
+    });
+
+    const qr = await client.createQrLogin();
+    const check = await client.checkQrLogin("u1");
+
+    expect(qr.unikey).toBe("u1");
+    expect(check).toEqual({
+      status: "AUTHORIZED",
+      cookie: "MUSIC_U=ok"
+    });
+  });
 });
