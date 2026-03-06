@@ -30,7 +30,7 @@ When using Docker Compose:
 ```json
 [
   {
-    "songId": "12345",
+    "title": "Back To Bedlam",
     "artist": "Artist Name",
     "tags": ["indie", "dream pop"]
   }

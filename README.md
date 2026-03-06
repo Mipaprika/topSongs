@@ -52,7 +52,7 @@ Douban baseline import reads [data/douban-baseline.json](/Users/shangliang/Docum
 ```json
 [
   {
-    "songId": "12345",
+    "title": "Back To Bedlam",
     "artist": "Artist Name",
     "tags": ["indie", "dream pop"]
   }
@@ -77,9 +77,9 @@ docker compose build app
 2. Run `douban-sync` once for baseline preference import.
 3. Schedule `run-once` daily on a server.
 
-## Verification (2026-03-05)
+## Verification (2026-03-06)
 
-- `npm test`: PASS (14 files, 21 tests)
+- `npm test`: PASS
 - `npm run typecheck`: PASS
 - `npm run run-once -- --dry-run`: output contains `selectedCount=20`
 
