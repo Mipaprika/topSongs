@@ -5,7 +5,7 @@ export function importDoubanBaseline(rows: DoubanSongRow[], db: DbClient): numbe
   const normalized = normalizeDoubanRows(rows);
   for (const row of normalized) {
     db.upsertDoubanBaselineSong({
-      songId: row.songId,
+      title: row.title,
       artist: row.artist,
       tags: row.tags
     });

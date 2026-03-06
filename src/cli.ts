@@ -3,10 +3,15 @@ import { NeteaseApiClient } from "./providers/netease/api-client";
 import { createNeteaseLiveAdapters } from "./providers/netease/live-adapters";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { DbClient } from "./db/client";
+import { DbClient, type DoubanBaselineWorkRecord } from "./db/client";
 import { CredentialStore } from "./security/credential-store";
 import { importDoubanBaseline } from "./ingest/douban-import";
 import type { DoubanSongRow } from "./ingest/douban-parser";
+import {
+  fetchDoubanBaselineFromPublicPages,
+  resolveDoubanUserId,
+  writeDoubanBaselineJson
+} from "./ingest/douban-public";
 
 type NeteaseBootstrapApi = Pick<NeteaseApiClient, "createQrLogin" | "checkQrLogin">;
 
@@ -14,6 +19,7 @@ export interface CliDeps {
   env?: NodeJS.ProcessEnv;
   createNeteaseApiClient?: (baseUrl: string) => NeteaseBootstrapApi;
   runOnceLiveDryRun?: typeof runOnceLiveDryRun;
+  resolveLongTermWorkSongIds?: (works: DoubanBaselineWorkRecord[]) => Promise<string[]>;
 }
 
 const HELP_TEXT = `
@@ -35,6 +41,9 @@ export async function runCli(args: string[], deps: CliDeps = {}): Promise<string
         baseUrl
       }));
   const runLiveDryRun = deps.runOnceLiveDryRun ?? runOnceLiveDryRun;
+  const resolveLongTermWorkSongIds =
+    deps.resolveLongTermWorkSongIds ??
+    (async (works: DoubanBaselineWorkRecord[]) => resolveLongTermWorkSongIdsFromApi(env, works));
 
   if (!command || command === "--help" || command === "-h") {
     return HELP_TEXT.trim();
@@ -60,7 +69,7 @@ export async function runCli(args: string[], deps: CliDeps = {}): Promise<string
       return `unikey=${payload.unikey}\nqrurl=${payload.qrurl}`;
     }
     case "douban-sync":
-      return runDoubanSync(env);
+      return await runDoubanSync(env);
     case "run-once":
       if (flags.includes("--dry-run")) {
         const baseUrl = env.NETEASE_API_BASE_URL;
@@ -75,7 +84,8 @@ export async function runCli(args: string[], deps: CliDeps = {}): Promise<string
             }
           });
           const cursor = env.NETEASE_EVENT_CURSOR ?? "0";
-          const longTermSongIds = loadLongTermSongIds(env.DB_PATH);
+          const longTermWorks = loadLongTermWorks(env.DB_PATH);
+          const longTermSongIds = await resolveLongTermWorkSongIds(longTermWorks);
           const result = await runLiveDryRun({
             incrementalProvider: adapters.incrementalProvider,
             cursor,
@@ -102,7 +112,7 @@ function readFlagValue(flags: string[], flag: string): string | null {
   return flags[index + 1] ?? null;
 }
 
-function loadLongTermSongIds(dbPath: string | undefined): string[] {
+function loadLongTermWorks(dbPath: string | undefined): DoubanBaselineWorkRecord[] {
   if (!dbPath || !existsSync(dbPath)) {
     return [];
   }
@@ -174,7 +184,7 @@ function openDb(dbPath: string | undefined): DbClient | null {
   return db;
 }
 
-function runDoubanSync(env: NodeJS.ProcessEnv): string {
+async function runDoubanSync(env: NodeJS.ProcessEnv): Promise<string> {
   const dbPath = env.DB_PATH;
   if (!dbPath) {
     throw new Error("DB_PATH is required for douban-sync");
@@ -192,19 +202,56 @@ function runDoubanSync(env: NodeJS.ProcessEnv): string {
   }
 
   const sourcePath = env.DOUBAN_BASELINE_PATH ?? join(process.cwd(), "data", "douban-baseline.json");
-  if (!existsSync(sourcePath)) {
-    db.close();
-    throw new Error(`Douban baseline file not found: ${sourcePath}`);
+  let rows: DoubanSongRow[];
+
+  if (existsSync(sourcePath)) {
+    const parsed = JSON.parse(readFileSync(sourcePath, "utf8")) as unknown;
+    if (!Array.isArray(parsed)) {
+      db.close();
+      throw new Error("Douban baseline JSON must be an array");
+    }
+    rows = parsed as DoubanSongRow[];
+  } else {
+    const userId = resolveDoubanUserId(env);
+    if (!userId) {
+      db.close();
+      throw new Error(`Douban baseline file not found: ${sourcePath}`);
+    }
+
+    rows = await fetchDoubanBaselineFromPublicPages({ userId });
+    writeDoubanBaselineJson(rows, process.cwd());
   }
 
-  const rows = JSON.parse(readFileSync(sourcePath, "utf8")) as unknown;
-  if (!Array.isArray(rows)) {
-    db.close();
-    throw new Error("Douban baseline JSON must be an array");
-  }
-
-  const imported = importDoubanBaseline(rows as DoubanSongRow[], db);
+  const imported = importDoubanBaseline(rows, db);
   const total = db.countDoubanBaselineSongs();
   db.close();
   return `douban-sync imported=${imported} total=${total}`;
+}
+
+async function resolveLongTermWorkSongIdsFromApi(
+  env: NodeJS.ProcessEnv,
+  works: DoubanBaselineWorkRecord[]
+): Promise<string[]> {
+  const baseUrl = env.NETEASE_API_BASE_URL;
+  if (!baseUrl || works.length === 0) {
+    return [];
+  }
+
+  const api = new NeteaseApiClient({ baseUrl });
+  const resolved: string[] = [];
+  const seen = new Set<string>();
+
+  for (const work of works) {
+    const matches = await api.searchSongIds(`${work.title} ${work.artist}`, 3);
+    for (const songId of matches) {
+      if (seen.has(songId)) {
+        continue;
+      }
+      seen.add(songId);
+      resolved.push(songId);
+      break;
+    }
+  }
+
+  return resolved;
 }

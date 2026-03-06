@@ -157,8 +157,8 @@ describe("runCli", () => {
     writeFileSync(
       jsonPath,
       JSON.stringify([
-        { songId: "s1", artist: "a1", tags: ["rock"] },
-        { songId: "s2", artist: "a2", tags: ["pop"] }
+        { title: "t1", artist: "a1", tags: ["rock"] },
+        { title: "t2", artist: "a2", tags: ["pop"] }
       ]),
       "utf8"
     );
@@ -185,5 +185,51 @@ describe("runCli", () => {
     expect(secondOut).toContain("skipped=already-imported");
     expect(db.countDoubanBaselineSongs()).toBe(2);
     db.close();
+  });
+
+  it("resolves long-term works into song candidates for live dry run", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "top-songs-longterm-cli-"));
+    tempDirs.push(dir);
+
+    const dbPath = join(dir, "app.sqlite");
+    const db = new DbClient(dbPath);
+    db.initSchema();
+    db.upsertDoubanBaselineSong({
+      title: "Back To Bedlam",
+      artist: "James Blunt",
+      tags: ["douban:collect", "摇滚"]
+    });
+    db.close();
+
+    const out = await runCli(["run-once", "--dry-run"], {
+      env: {
+        DB_PATH: dbPath,
+        NETEASE_API_BASE_URL: "http://localhost:3000",
+        NETEASE_COOKIE: "MUSIC_U=live"
+      } as NodeJS.ProcessEnv,
+      resolveLongTermWorkSongIds: async (works) => {
+        expect(works).toEqual([
+          {
+            title: "Back To Bedlam",
+            artist: "James Blunt",
+            tags: ["douban:collect", "摇滚"]
+          }
+        ]);
+        return ["song-1"];
+      },
+      runOnceLiveDryRun: async (input) => {
+        expect(input.longTermSongIds).toEqual(["song-1"]);
+        return {
+          selectedCount: 1,
+          candidates: 1,
+          events: 0,
+          nextCursor: "0",
+          songIds: ["song-1"]
+        };
+      }
+    });
+
+    expect(out).toContain("selectedCount=1");
+    expect(out).toContain("song-1");
   });
 });

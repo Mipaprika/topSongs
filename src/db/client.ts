@@ -16,7 +16,13 @@ export interface RecommendationRunRecord {
 }
 
 export interface DoubanBaselineSongInput {
-  songId: string;
+  title: string;
+  artist: string;
+  tags: string[];
+}
+
+export interface DoubanBaselineWorkRecord {
+  title: string;
   artist: string;
   tags: string[];
 }
@@ -57,6 +63,7 @@ export class DbClient {
   initSchema(): void {
     const schemaSql = readFileSync(schemaPath, "utf8");
     this.db.exec(schemaSql);
+    this.migrateLegacyDoubanBaselineSongs();
   }
 
   createRecommendationRun(input: CreateRecommendationRunInput): RecommendationRunRecord {
@@ -87,14 +94,13 @@ export class DbClient {
 
   upsertDoubanBaselineSong(input: DoubanBaselineSongInput): void {
     const stmt = this.db.prepare(`
-      INSERT INTO douban_baseline_songs (song_id, artist, tags)
+      INSERT INTO douban_baseline_songs (title, artist, tags)
       VALUES (?, ?, ?)
-      ON CONFLICT(song_id) DO UPDATE SET
-        artist = excluded.artist,
+      ON CONFLICT(artist, title) DO UPDATE SET
         tags = excluded.tags,
         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
     `);
-    stmt.run(input.songId, input.artist, JSON.stringify(input.tags));
+    stmt.run(input.title, input.artist, JSON.stringify(input.tags));
   }
 
   countDoubanBaselineSongs(): number {
@@ -106,15 +112,19 @@ export class DbClient {
     return row.total;
   }
 
-  listDoubanBaselineSongs(limit: number): string[] {
+  listDoubanBaselineSongs(limit: number): DoubanBaselineWorkRecord[] {
     const stmt = this.db.prepare(`
-      SELECT song_id AS songId
+      SELECT title, artist, tags
       FROM douban_baseline_songs
       ORDER BY updated_at DESC
       LIMIT ?
     `);
-    const rows = stmt.all(limit) as Array<{ songId: string }>;
-    return rows.map((row) => row.songId);
+    const rows = stmt.all(limit) as Array<{ title: string; artist: string; tags: string }>;
+    return rows.map((row) => ({
+      title: row.title,
+      artist: row.artist,
+      tags: JSON.parse(row.tags) as string[]
+    }));
   }
 
   insertNeteaseEvent(input: NeteaseEventInput): boolean {
@@ -170,5 +180,33 @@ export class DbClient {
 
     const row = stmt.get() as NeteaseAuthStateRecord | undefined;
     return row ?? null;
+  }
+
+  private migrateLegacyDoubanBaselineSongs(): void {
+    const columns = this.db.prepare(`PRAGMA table_info(douban_baseline_songs)`).all() as Array<{ name: string }>;
+    const hasSongId = columns.some((column) => column.name === "song_id");
+    const hasTitle = columns.some((column) => column.name === "title");
+
+    if (!hasSongId || hasTitle) {
+      return;
+    }
+
+    this.db.exec(`
+      ALTER TABLE douban_baseline_songs RENAME TO douban_baseline_songs_legacy;
+
+      CREATE TABLE douban_baseline_songs (
+        title TEXT NOT NULL,
+        artist TEXT NOT NULL,
+        tags TEXT NOT NULL,
+        updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        PRIMARY KEY (artist, title)
+      );
+
+      INSERT INTO douban_baseline_songs (title, artist, tags, updated_at)
+      SELECT song_id, artist, tags, updated_at
+      FROM douban_baseline_songs_legacy;
+
+      DROP TABLE douban_baseline_songs_legacy;
+    `);
   }
 }

@@ -59,6 +59,8 @@ Douban baseline import reads [data/douban-baseline.json](/Users/shangliang/Docum
 ]
 ```
 
+If the file does not exist, `douban-sync` can fetch from a public Douban profile when either `DOUBAN_USER_ID` or `DOUBAN_PROFILE_URL` is provided.
+
 If QR login behaves unexpectedly, see the troubleshooting section in [operations.md](/Users/shangliang/Documents/Xi/Code/topSongs/docs/operations.md).
 
 Persistent SQLite data is stored on the host at [data](/Users/shangliang/Documents/Xi/Code/topSongs/data). The database file inside the container is `/app/data/top-songs.db`.
@@ -83,6 +85,6 @@ docker compose build app
 
 ## Known Limitations
 
-- Douban baseline import currently expects a prepared local JSON file rather than pulling directly from Douban.
+- Douban baseline import works best with a public Douban profile or a prepared local JSON file.
 - Netease incremental event classification currently uses heuristics from event text.
 - SQLite currently uses `node:sqlite` (experimental in Node 24).

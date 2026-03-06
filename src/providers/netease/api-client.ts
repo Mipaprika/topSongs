@@ -17,6 +17,7 @@ interface NeteaseResponseEnvelope<T> {
   code: number;
   data?: T;
   cookie?: string;
+  result?: T;
   [key: string]: unknown;
 }
 
@@ -165,6 +166,25 @@ export class NeteaseApiClient {
     }
 
     return [];
+  }
+
+  async searchSongIds(keywords: string, limit = 5): Promise<string[]> {
+    const body = await this.requestJson<NeteaseResponseEnvelope<{ songs?: unknown[] }>>("/search", {
+      query: {
+        keywords,
+        type: 1,
+        limit,
+        offset: 0,
+        timestamp: Date.now()
+      }
+    });
+
+    const songs = body.result?.songs ?? body.data?.songs ?? (body as { songs?: unknown[] }).songs ?? [];
+    if (!Array.isArray(songs)) {
+      return [];
+    }
+
+    return songs.map(extractSongId).filter((songId): songId is string => songId !== null);
   }
 
   async updatePlaylistTracks(

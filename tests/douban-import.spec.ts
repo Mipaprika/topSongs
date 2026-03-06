@@ -24,15 +24,15 @@ describe("importDoubanBaseline", () => {
 
     const firstCount = importDoubanBaseline(
       [
-        { songId: "s1", artist: "a1", tags: ["rock"] },
-        { songId: "s2", artist: "a2", tags: ["pop"] },
-        { songId: "s3", artist: "a3", tags: ["indie"] }
+        { title: "t1", artist: "a1", tags: ["rock"] },
+        { title: "t2", artist: "a2", tags: ["pop"] },
+        { title: "t3", artist: "a3", tags: ["indie"] }
       ],
       db
     );
 
     const secondCount = importDoubanBaseline(
-      [{ songId: "s2", artist: "a2-updated", tags: ["synthpop"] }],
+      [{ title: "t2", artist: "a2", tags: ["synthpop"] }],
       db
     );
 

@@ -15,7 +15,9 @@ describe("CredentialStore", () => {
   it("throws on modified payload", () => {
     const store = new CredentialStore("test-master-key-32bytes-min");
     const cipher = store.encrypt({ cookie: "abc=1" });
-    const tampered = `${cipher.slice(0, -2)}aa`;
+    const envelope = Buffer.from(cipher, "base64url");
+    envelope[0] = envelope[0] ^ 0xff;
+    const tampered = envelope.toString("base64url");
 
     expect(() => store.decrypt(tampered)).toThrow(/decrypt/i);
   });

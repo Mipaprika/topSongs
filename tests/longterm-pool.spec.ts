@@ -14,17 +14,17 @@ afterEach(() => {
 });
 
 describe("listDoubanBaselineSongs", () => {
-  it("returns up to N long-term songs from douban baseline", () => {
+  it("returns up to N long-term works from douban baseline", () => {
     const dir = mkdtempSync(join(tmpdir(), "top-songs-longterm-"));
     tempDirs.push(dir);
 
     const db = new DbClient(join(dir, "app.sqlite"));
     db.initSchema();
-    db.upsertDoubanBaselineSong({ songId: "s1", artist: "a1", tags: ["rock"] });
-    db.upsertDoubanBaselineSong({ songId: "s2", artist: "a2", tags: ["pop"] });
+    db.upsertDoubanBaselineSong({ title: "t1", artist: "a1", tags: ["rock"] });
+    db.upsertDoubanBaselineSong({ title: "t2", artist: "a2", tags: ["pop"] });
 
     const pool = db.listDoubanBaselineSongs(1);
     expect(pool.length).toBe(1);
-    expect(["s1", "s2"]).toContain(pool[0]);
+    expect(["t1", "t2"]).toContain(pool[0].title);
   });
 });

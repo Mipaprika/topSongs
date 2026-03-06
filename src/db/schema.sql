@@ -15,10 +15,11 @@ CREATE TABLE IF NOT EXISTS recommendation_run_songs (
 );
 
 CREATE TABLE IF NOT EXISTS douban_baseline_songs (
-  song_id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
   artist TEXT NOT NULL,
   tags TEXT NOT NULL,
-  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  PRIMARY KEY (artist, title)
 );
 
 CREATE TABLE IF NOT EXISTS netease_events (

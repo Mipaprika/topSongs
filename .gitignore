@@ -5,3 +5,5 @@ dist
 .env
 .env.example
 data/*.db
+data/douban-baseline.json
+.playwright-cli/

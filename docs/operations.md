@@ -42,6 +42,13 @@ The import is intentionally one-time:
 - if `douban_baseline_songs` is empty, the rows are imported
 - if the baseline table already has data, `douban-sync` returns `skipped=already-imported`
 
+If the JSON file does not exist, `douban-sync` can fetch directly from a public Douban profile when one of these is set:
+
+- `DOUBAN_USER_ID=sample_user_01`
+- `DOUBAN_PROFILE_URL=https://www.douban.com/people/sample_user_01`
+
+In that mode, the command first generates [data/douban-baseline.json](/Users/shangliang/Documents/Xi/Code/topSongs/data/douban-baseline.json), then imports it into SQLite.
+
 ### QR Login Troubleshooting
 
 If `bootstrap-login -- --check <unikey>` returns `WAITING_SCAN`, `EXPIRED`, or you suspect the wrong QR code was scanned, avoid copying `unikey` and `qrurl` by hand. Generate and open the QR image from the same command output:
