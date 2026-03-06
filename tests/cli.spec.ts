@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { runCli } from "../src/cli";
 import { DbClient } from "../src/db/client";
-import type { QrCheckResult } from "../src/providers/netease/types";
+import type { FetchEventsResult, QrCheckResult } from "../src/providers/netease/types";
 import { CredentialStore } from "../src/security/credential-store";
 
 const tempDirs: string[] = [];
@@ -294,6 +294,53 @@ describe("runCli", () => {
     expect(out).toContain("selectedCount=2");
     expect(out).toContain("song-1,song-2");
   });
+
+  it("publishes playlist on run-once and records the run", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "top-songs-publish-cli-"));
+    tempDirs.push(dir);
+
+    const dbPath = join(dir, "app.sqlite");
+    const playlistOps: Array<{ op: "del" | "add"; tracks: string[] }> = [];
+
+    const out = await runCli(["run-once"], {
+      env: {
+        DB_PATH: dbPath,
+        NETEASE_API_BASE_URL: "http://localhost:3000",
+        NETEASE_COOKIE: "MUSIC_U=live",
+        NETEASE_PLAYLIST_ID: "playlist-1"
+      } as NodeJS.ProcessEnv,
+      createNeteaseApiClient: () =>
+        createApiStub({
+          async fetchEvents() {
+            return {
+              nextCursor: "10",
+              rawEvents: []
+            };
+          },
+          async getPlaylistTrackIds(playlistId) {
+            expect(playlistId).toBe("playlist-1");
+            return ["old-1", "old-2"];
+          },
+          async updatePlaylistTracks(playlistId, op, tracks) {
+            expect(playlistId).toBe("playlist-1");
+            playlistOps.push({ op, tracks });
+          }
+        }),
+      resolveLongTermWorkSongIds: async () => ["s1", "s2", "s3"]
+    });
+
+    expect(out).toContain("run-once published");
+    expect(playlistOps).toEqual([
+      { op: "del", tracks: ["old-1", "old-2"] },
+      { op: "add", tracks: ["s1", "s2", "s3"] }
+    ]);
+
+    const db = new DbClient(dbPath);
+    db.initSchema();
+    expect(db.countRecommendationRuns()).toBe(1);
+    expect(db.countRecommendationRunSongs()).toBe(3);
+    db.close();
+  });
 });
 
 function createApiStub(overrides: Partial<{
@@ -303,6 +350,10 @@ function createApiStub(overrides: Partial<{
   getLoginProfile: (cookie: string) => Promise<{ userId: string | null }>;
   getLikedSongIds: (userId: string, cookie: string) => Promise<string[]>;
   getSongsDetail: (songIds: string[], cookie?: string) => Promise<Array<{ songId: string; title: string; artist: string }>>;
+  refreshCookie: (cookie: string) => Promise<string>;
+  fetchEvents: (cursor: string, cookie: string) => Promise<FetchEventsResult>;
+  getPlaylistTrackIds: (playlistId: string, cookie: string) => Promise<string[]>;
+  updatePlaylistTracks: (playlistId: string, op: "add" | "del", tracks: string[], cookie: string) => Promise<void>;
 }> = {}) {
   return {
     async createQrLogin() {
@@ -328,6 +379,23 @@ function createApiStub(overrides: Partial<{
     },
     async getSongsDetail(songIds: string[], cookie?: string) {
       return (await overrides.getSongsDetail?.(songIds, cookie)) ?? [];
+    },
+    async refreshCookie(cookie: string) {
+      return (await overrides.refreshCookie?.(cookie)) ?? cookie;
+    },
+    async fetchEvents(cursor: string, cookie: string) {
+      return (
+        (await overrides.fetchEvents?.(cursor, cookie)) ?? {
+          nextCursor: cursor,
+          rawEvents: []
+        }
+      );
+    },
+    async getPlaylistTrackIds(playlistId: string, cookie: string) {
+      return (await overrides.getPlaylistTrackIds?.(playlistId, cookie)) ?? [];
+    },
+    async updatePlaylistTracks(playlistId: string, op: "add" | "del", tracks: string[], cookie: string) {
+      await overrides.updatePlaylistTracks?.(playlistId, op, tracks, cookie);
     }
   };
 }

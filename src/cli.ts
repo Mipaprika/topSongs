@@ -1,6 +1,7 @@
 import { runOnceDryRun, runOnceLiveDryRun } from "./jobs/run-once";
 import { NeteaseApiClient } from "./providers/netease/api-client";
 import { createNeteaseLiveAdapters } from "./providers/netease/live-adapters";
+import { publishDailyPlaylist } from "./publish/playlist-publisher";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DbClient, type DoubanBaselineWorkRecord } from "./db/client";
@@ -16,7 +17,16 @@ import {
 
 type NeteaseCliApi = Pick<
   NeteaseApiClient,
-  "createQrLogin" | "checkQrLogin" | "searchSongIds" | "getLoginProfile" | "getLikedSongIds" | "getSongsDetail"
+  | "createQrLogin"
+  | "checkQrLogin"
+  | "searchSongIds"
+  | "getLoginProfile"
+  | "getLikedSongIds"
+  | "getSongsDetail"
+  | "refreshCookie"
+  | "fetchEvents"
+  | "getPlaylistTrackIds"
+  | "updatePlaylistTracks"
 >;
 
 export interface CliDeps {
@@ -79,33 +89,16 @@ export async function runCli(args: string[], deps: CliDeps = {}): Promise<string
       return await runNeteaseSync(env, createNeteaseApiClient);
     case "run-once":
       if (flags.includes("--dry-run")) {
-        const baseUrl = env.NETEASE_API_BASE_URL;
-        const cookie = loadPersistedCookie(env) ?? env.NETEASE_COOKIE;
-        if (baseUrl && cookie) {
-          const adapters = createNeteaseLiveAdapters({
-            session: {
-              getCookie: () => cookie
-            },
-            apiClientOptions: {
-              baseUrl
-            }
-          });
-          const cursor = env.NETEASE_EVENT_CURSOR ?? "0";
-          const longTermWorks = loadLongTermWorks(env.DB_PATH);
-          const longTermSongIds = await resolveLongTermWorkSongIds(longTermWorks);
-          const result = await runLiveDryRun({
-            incrementalProvider: adapters.incrementalProvider,
-            cursor,
-            limit: 20,
-            longTermSongIds
-          });
+        const liveContext = createLiveRunContext(env, createNeteaseApiClient);
+        if (liveContext) {
+          const result = await executeLiveRecommendation(env, liveContext.api, runLiveDryRun, resolveLongTermWorkSongIds);
           return `run-once dry-run completed: selectedCount=${result.selectedCount} events=${result.events} candidates=${result.candidates} nextCursor=${result.nextCursor}\ntop20SongIds=${result.songIds.join(",")}`;
         }
 
         const result = runOnceDryRun();
         return `run-once dry-run completed: selectedCount=${result.selectedCount}`;
       }
-      return "run-once started";
+      return await runOnceAndPublish(env, createNeteaseApiClient, runLiveDryRun, resolveLongTermWorkSongIds);
     default:
       return `Unknown command: ${command}\n\n${HELP_TEXT.trim()}`;
   }
@@ -189,6 +182,109 @@ function openDb(dbPath: string | undefined): DbClient | null {
   const db = new DbClient(dbPath);
   db.initSchema();
   return db;
+}
+
+function createLiveRunContext(
+  env: NodeJS.ProcessEnv,
+  createNeteaseApiClient: (baseUrl: string) => NeteaseCliApi
+): { api: NeteaseCliApi; cookie: string } | null {
+  const baseUrl = env.NETEASE_API_BASE_URL;
+  const cookie = loadPersistedCookie(env) ?? env.NETEASE_COOKIE;
+  if (!baseUrl || !cookie) {
+    return null;
+  }
+
+  return {
+    api: createNeteaseApiClient(baseUrl),
+    cookie
+  };
+}
+
+async function executeLiveRecommendation(
+  env: NodeJS.ProcessEnv,
+  api: NeteaseCliApi,
+  runLiveDryRun: typeof runOnceLiveDryRun,
+  resolveLongTermWorkSongIds: (works: DoubanBaselineWorkRecord[]) => Promise<string[]>
+) {
+  const cookie = loadPersistedCookie(env) ?? env.NETEASE_COOKIE;
+  if (!cookie) {
+    throw new Error("Netease cookie is required for live run");
+  }
+
+  const adapters = createNeteaseLiveAdapters({
+    session: {
+      getCookie: () => cookie
+    },
+    api
+  });
+  const cursor = env.NETEASE_EVENT_CURSOR ?? "0";
+  const longTermWorks = loadLongTermWorks(env.DB_PATH);
+  const longTermSongIds = await resolveLongTermWorkSongIds(longTermWorks);
+
+  return runLiveDryRun({
+    incrementalProvider: adapters.incrementalProvider,
+    cursor,
+    limit: 20,
+    longTermSongIds
+  });
+}
+
+async function runOnceAndPublish(
+  env: NodeJS.ProcessEnv,
+  createNeteaseApiClient: (baseUrl: string) => NeteaseCliApi,
+  runLiveDryRun: typeof runOnceLiveDryRun,
+  resolveLongTermWorkSongIds: (works: DoubanBaselineWorkRecord[]) => Promise<string[]>
+): Promise<string> {
+  const liveContext = createLiveRunContext(env, createNeteaseApiClient);
+  if (!liveContext) {
+    throw new Error("NETEASE_API_BASE_URL and valid Netease cookie are required for run-once");
+  }
+
+  const playlistId = env.NETEASE_PLAYLIST_ID;
+  if (!playlistId) {
+    throw new Error("NETEASE_PLAYLIST_ID is required for run-once");
+  }
+
+  const result = await executeLiveRecommendation(env, liveContext.api, runLiveDryRun, resolveLongTermWorkSongIds);
+  const adapters = createNeteaseLiveAdapters({
+    session: {
+      getCookie: () => liveContext.cookie
+    },
+    api: liveContext.api
+  });
+
+  await publishDailyPlaylist(playlistId, result.songIds, adapters.playlistProvider);
+  persistRecommendationRun(env.DB_PATH, result.songIds);
+
+  return `run-once published: selectedCount=${result.selectedCount} playlistId=${playlistId}\ntop20SongIds=${result.songIds.join(",")}`;
+}
+
+function persistRecommendationRun(dbPath: string | undefined, songIds: string[]): void {
+  if (!dbPath) {
+    return;
+  }
+
+  const db = openDb(dbPath);
+  if (!db) {
+    return;
+  }
+
+  const runDate = new Date().toISOString().slice(0, 10);
+  db.deleteRecommendationRunByDate(runDate);
+
+  const run = db.createRecommendationRun({
+    runDate,
+    selectedCount: songIds.length
+  });
+
+  for (const songId of songIds) {
+    db.insertRecommendationRunSong({
+      runId: run.id,
+      songId
+    });
+  }
+
+  db.close();
 }
 
 async function runDoubanSync(env: NodeJS.ProcessEnv): Promise<string> {

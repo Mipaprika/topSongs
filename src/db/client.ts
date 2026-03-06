@@ -15,6 +15,12 @@ export interface RecommendationRunRecord {
   createdAt: string;
 }
 
+export interface RecommendationRunSongInput {
+  runId: number;
+  songId: string;
+  score?: number | null;
+}
+
 export interface DoubanBaselineSongInput {
   title: string;
   artist: string;
@@ -97,8 +103,42 @@ export class DbClient {
     };
   }
 
+  countRecommendationRuns(): number {
+    const stmt = this.db.prepare(`
+      SELECT COUNT(*) AS total
+      FROM recommendation_runs
+    `);
+    const row = stmt.get() as { total: number };
+    return row.total;
+  }
+
+  countRecommendationRunSongs(): number {
+    const stmt = this.db.prepare(`
+      SELECT COUNT(*) AS total
+      FROM recommendation_run_songs
+    `);
+    const row = stmt.get() as { total: number };
+    return row.total;
+  }
+
   close(): void {
     this.db.close();
+  }
+
+  deleteRecommendationRunByDate(runDate: string): void {
+    const stmt = this.db.prepare(`
+      DELETE FROM recommendation_runs
+      WHERE run_date = ?
+    `);
+    stmt.run(runDate);
+  }
+
+  insertRecommendationRunSong(input: RecommendationRunSongInput): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO recommendation_run_songs (run_id, song_id, score)
+      VALUES (?, ?, ?)
+    `);
+    stmt.run(input.runId, input.songId, input.score ?? null);
   }
 
   upsertDoubanBaselineSong(input: DoubanBaselineSongInput): void {

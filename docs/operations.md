@@ -111,6 +111,7 @@ If the response contains `account: null` and `profile: null`, the cookie is not 
 - Run with scheduler on server after compose is up
 - Real runs merge `douban_baseline_songs`, `netease_baseline_songs`, and recent incremental events
 - Daily runs only fetch incremental events; the two baselines stay fixed unless you explicitly rebuild them
+- `run-once` clears the current tracks in `NETEASE_PLAYLIST_ID` and writes the latest 20 recommendations back into the same playlist
 
 ## Auth Expiry
 

@@ -46,6 +46,7 @@ docker compose exec app npm run bootstrap-login -- --check <unikey>
 docker compose exec app npm run douban-sync
 docker compose exec app npm run netease-sync
 docker compose exec app npm run run-once -- --dry-run
+docker compose exec app npm run run-once
 ```
 
 Douban baseline import reads [data/douban-baseline.json](/Users/shangliang/Documents/Xi/Code/topSongs/data/douban-baseline.json) by default. The file should be a JSON array like:
@@ -79,7 +80,7 @@ docker compose build app
 1. Run `bootstrap-login` once for Netease auth.
 2. Run `douban-sync` once for Douban baseline import.
 3. Run `netease-sync` once for Netease liked-song baseline import.
-4. Schedule `run-once` daily on a server.
+4. Schedule `run-once` daily on a server. This command replaces the contents of `NETEASE_PLAYLIST_ID` with the latest 20 picks.
 
 ## Verification (2026-03-06)
 
