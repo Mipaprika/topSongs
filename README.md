@@ -47,6 +47,18 @@ docker compose exec app npm run douban-sync
 docker compose exec app npm run run-once -- --dry-run
 ```
 
+Douban baseline import reads [data/douban-baseline.json](/Users/shangliang/Documents/Xi/Code/topSongs/data/douban-baseline.json) by default. The file should be a JSON array like:
+
+```json
+[
+  {
+    "songId": "12345",
+    "artist": "Artist Name",
+    "tags": ["indie", "dream pop"]
+  }
+]
+```
+
 If QR login behaves unexpectedly, see the troubleshooting section in [operations.md](/Users/shangliang/Documents/Xi/Code/topSongs/docs/operations.md).
 
 Persistent SQLite data is stored on the host at [data](/Users/shangliang/Documents/Xi/Code/topSongs/data). The database file inside the container is `/app/data/top-songs.db`.
@@ -71,6 +83,6 @@ docker compose build app
 
 ## Known Limitations
 
-- Douban data source is still placeholder (no real export parser/connector yet).
+- Douban baseline import currently expects a prepared local JSON file rather than pulling directly from Douban.
 - Netease incremental event classification currently uses heuristics from event text.
 - SQLite currently uses `node:sqlite` (experimental in Node 24).

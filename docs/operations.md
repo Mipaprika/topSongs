@@ -23,6 +23,25 @@ When using Docker Compose:
 5. Run one-time Douban import:
    - `docker compose exec app npm run douban-sync`
 
+### Douban Baseline File
+
+`douban-sync` reads [data/douban-baseline.json](/Users/shangliang/Documents/Xi/Code/topSongs/data/douban-baseline.json) by default. The file must be a JSON array:
+
+```json
+[
+  {
+    "songId": "12345",
+    "artist": "Artist Name",
+    "tags": ["indie", "dream pop"]
+  }
+]
+```
+
+The import is intentionally one-time:
+
+- if `douban_baseline_songs` is empty, the rows are imported
+- if the baseline table already has data, `douban-sync` returns `skipped=already-imported`
+
 ### QR Login Troubleshooting
 
 If `bootstrap-login -- --check <unikey>` returns `WAITING_SCAN`, `EXPIRED`, or you suspect the wrong QR code was scanned, avoid copying `unikey` and `qrurl` by hand. Generate and open the QR image from the same command output:

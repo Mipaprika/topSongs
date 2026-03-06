@@ -1,9 +1,12 @@
 import { runOnceDryRun, runOnceLiveDryRun } from "./jobs/run-once";
 import { NeteaseApiClient } from "./providers/netease/api-client";
 import { createNeteaseLiveAdapters } from "./providers/netease/live-adapters";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { DbClient } from "./db/client";
 import { CredentialStore } from "./security/credential-store";
+import { importDoubanBaseline } from "./ingest/douban-import";
+import type { DoubanSongRow } from "./ingest/douban-parser";
 
 type NeteaseBootstrapApi = Pick<NeteaseApiClient, "createQrLogin" | "checkQrLogin">;
 
@@ -57,7 +60,7 @@ export async function runCli(args: string[], deps: CliDeps = {}): Promise<string
       return `unikey=${payload.unikey}\nqrurl=${payload.qrurl}`;
     }
     case "douban-sync":
-      return "douban-sync started";
+      return runDoubanSync(env);
     case "run-once":
       if (flags.includes("--dry-run")) {
         const baseUrl = env.NETEASE_API_BASE_URL;
@@ -169,4 +172,39 @@ function openDb(dbPath: string | undefined): DbClient | null {
   const db = new DbClient(dbPath);
   db.initSchema();
   return db;
+}
+
+function runDoubanSync(env: NodeJS.ProcessEnv): string {
+  const dbPath = env.DB_PATH;
+  if (!dbPath) {
+    throw new Error("DB_PATH is required for douban-sync");
+  }
+
+  const db = openDb(dbPath);
+  if (!db) {
+    throw new Error("failed to open database for douban-sync");
+  }
+
+  const existingCount = db.countDoubanBaselineSongs();
+  if (existingCount > 0) {
+    db.close();
+    return `douban-sync skipped=already-imported existing=${existingCount}`;
+  }
+
+  const sourcePath = env.DOUBAN_BASELINE_PATH ?? join(process.cwd(), "data", "douban-baseline.json");
+  if (!existsSync(sourcePath)) {
+    db.close();
+    throw new Error(`Douban baseline file not found: ${sourcePath}`);
+  }
+
+  const rows = JSON.parse(readFileSync(sourcePath, "utf8")) as unknown;
+  if (!Array.isArray(rows)) {
+    db.close();
+    throw new Error("Douban baseline JSON must be an array");
+  }
+
+  const imported = importDoubanBaseline(rows as DoubanSongRow[], db);
+  const total = db.countDoubanBaselineSongs();
+  db.close();
+  return `douban-sync imported=${imported} total=${total}`;
 }

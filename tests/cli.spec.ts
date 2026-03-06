@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
@@ -146,5 +146,44 @@ describe("runCli", () => {
 
     expect(runOut).toContain("selectedCount=2");
     expect(runOut).toContain("events=1");
+  });
+
+  it("imports douban baseline from json only once", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "top-songs-douban-cli-"));
+    tempDirs.push(dir);
+
+    const dbPath = join(dir, "app.sqlite");
+    const jsonPath = join(dir, "douban-baseline.json");
+    writeFileSync(
+      jsonPath,
+      JSON.stringify([
+        { songId: "s1", artist: "a1", tags: ["rock"] },
+        { songId: "s2", artist: "a2", tags: ["pop"] }
+      ]),
+      "utf8"
+    );
+
+    const firstOut = await runCli(["douban-sync"], {
+      env: {
+        DB_PATH: dbPath,
+        DOUBAN_BASELINE_PATH: jsonPath
+      } as NodeJS.ProcessEnv
+    });
+
+    const db = new DbClient(dbPath);
+    db.initSchema();
+    expect(firstOut).toContain("imported=2");
+    expect(db.countDoubanBaselineSongs()).toBe(2);
+
+    const secondOut = await runCli(["douban-sync"], {
+      env: {
+        DB_PATH: dbPath,
+        DOUBAN_BASELINE_PATH: jsonPath
+      } as NodeJS.ProcessEnv
+    });
+
+    expect(secondOut).toContain("skipped=already-imported");
+    expect(db.countDoubanBaselineSongs()).toBe(2);
+    db.close();
   });
 });
