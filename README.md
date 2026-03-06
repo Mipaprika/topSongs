@@ -46,6 +46,8 @@ docker compose exec app npm run douban-sync
 docker compose exec app npm run run-once -- --dry-run
 ```
 
+If QR login behaves unexpectedly, see the troubleshooting section in [operations.md](/Users/shangliang/Documents/Xi/Code/topSongs/docs/operations.md).
+
 Persistent SQLite data is stored on the host at [data](/Users/shangliang/Documents/Xi/Code/topSongs/data). The database file inside the container is `/app/data/top-songs.db`.
 
 If you change application code, rebuild the app image:
