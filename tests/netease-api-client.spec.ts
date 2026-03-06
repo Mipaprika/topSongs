@@ -55,6 +55,30 @@ describe("NeteaseApiClient", () => {
     expect(calls[1]).toContain("/login/qr/create");
   });
 
+  it("normalizes authorized qr cookie into request header format", async () => {
+    const fetchFn: typeof fetch = async (input) => {
+      const url = String(input);
+      expect(url).toContain("/login/qr/check");
+
+      return jsonResponse({
+        code: 803,
+        cookie:
+          "MUSIC_U=next-cookie; Max-Age=15552000; Expires=Tue, 01 Sep 2026 14:48:05 GMT; Path=/;; __csrf=csrf-token; Path=/; HttpOnly"
+      });
+    };
+
+    const client = new NeteaseApiClient({
+      baseUrl: "https://ncm.example.com",
+      fetchFn
+    });
+
+    const result = await client.checkQrLogin("u1");
+    expect(result).toEqual({
+      status: "AUTHORIZED",
+      cookie: "MUSIC_U=next-cookie; __csrf=csrf-token"
+    });
+  });
+
   it("refreshes cookie and reads set-cookie header", async () => {
     const fetchFn: typeof fetch = async (input) => {
       const url = String(input);
@@ -77,6 +101,6 @@ describe("NeteaseApiClient", () => {
     });
 
     const cookie = await client.refreshCookie("MUSIC_U=old-cookie");
-    expect(cookie).toContain("MUSIC_U=next-cookie");
+    expect(cookie).toBe("MUSIC_U=next-cookie");
   });
 });

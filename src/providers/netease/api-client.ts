@@ -222,7 +222,7 @@ export class NeteaseApiClient {
   private extractCookie(body: NeteaseResponseEnvelope<unknown>, response: Response | undefined): string | null {
     const candidate = body.cookie ?? (body.data as { cookie?: string } | undefined)?.cookie;
     if (typeof candidate === "string" && candidate.trim().length > 0) {
-      return candidate;
+      return normalizeCookieHeader(candidate);
     }
 
     if (!response) {
@@ -233,7 +233,7 @@ export class NeteaseApiClient {
     if (!setCookie || setCookie.trim().length === 0) {
       return null;
     }
-    return setCookie;
+    return normalizeCookieHeader(setCookie);
   }
 }
 
@@ -270,4 +270,52 @@ function extractSongId(song: unknown): string | null {
     return String(id);
   }
   return null;
+}
+
+function normalizeCookieHeader(rawCookie: string): string {
+  const reservedAttributes = new Set([
+    "path",
+    "expires",
+    "max-age",
+    "domain",
+    "httponly",
+    "secure",
+    "samesite",
+    "priority",
+    "partitioned"
+  ]);
+
+  const parts = rawCookie
+    .split(";")
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+
+  const pairs: string[] = [];
+  const seen = new Set<string>();
+
+  for (const part of parts) {
+    const equalIndex = part.indexOf("=");
+    if (equalIndex === -1) {
+      continue;
+    }
+
+    const key = part.slice(0, equalIndex).trim();
+    const value = part.slice(equalIndex + 1).trim();
+    if (!key || !value) {
+      continue;
+    }
+
+    if (reservedAttributes.has(key.toLowerCase())) {
+      continue;
+    }
+
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    pairs.push(`${key}=${value}`);
+  }
+
+  return pairs.join("; ");
 }

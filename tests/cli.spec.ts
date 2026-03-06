@@ -52,4 +52,25 @@ describe("runCli", () => {
     expect(out).toContain("unikey=u1");
     expect(out).toContain("qrurl=https://music.163.com/login?codekey=u1");
   });
+
+  it("returns normalized cookie for bootstrap-login check", async () => {
+    const out = await runCli(["bootstrap-login", "--check", "u1"], {
+      createNeteaseApiClient: () => ({
+        async createQrLogin() {
+          return {
+            unikey: "u1",
+            qrurl: "https://music.163.com/login?codekey=u1"
+          };
+        },
+        async checkQrLogin() {
+          return {
+            status: "AUTHORIZED" as const,
+            cookie: "MUSIC_U=next-cookie; __csrf=csrf-token"
+          };
+        }
+      })
+    });
+
+    expect(out).toBe("qr-status=AUTHORIZED cookie=MUSIC_U=next-cookie; __csrf=csrf-token");
+  });
 });
