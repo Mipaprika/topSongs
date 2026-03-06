@@ -7,17 +7,21 @@ import { DbClient, type DoubanBaselineWorkRecord } from "./db/client";
 import { CredentialStore } from "./security/credential-store";
 import { importDoubanBaseline } from "./ingest/douban-import";
 import type { DoubanSongRow } from "./ingest/douban-parser";
+import type { NeteaseSongDetail } from "./providers/netease/types";
 import {
   fetchDoubanBaselineFromPublicPages,
   resolveDoubanUserId,
   writeDoubanBaselineJson
 } from "./ingest/douban-public";
 
-type NeteaseBootstrapApi = Pick<NeteaseApiClient, "createQrLogin" | "checkQrLogin">;
+type NeteaseCliApi = Pick<
+  NeteaseApiClient,
+  "createQrLogin" | "checkQrLogin" | "searchSongIds" | "getLoginProfile" | "getLikedSongIds" | "getSongsDetail"
+>;
 
 export interface CliDeps {
   env?: NodeJS.ProcessEnv;
-  createNeteaseApiClient?: (baseUrl: string) => NeteaseBootstrapApi;
+  createNeteaseApiClient?: (baseUrl: string) => NeteaseCliApi;
   runOnceLiveDryRun?: typeof runOnceLiveDryRun;
   resolveLongTermWorkSongIds?: (works: DoubanBaselineWorkRecord[]) => Promise<string[]>;
 }
@@ -28,6 +32,7 @@ Usage: top-songs <command>
 Commands:
   bootstrap-login   Start Netease QR login bootstrap
   douban-sync       Run one-time Douban baseline import
+  netease-sync      Run one-time Netease baseline import
   run-once          Execute one daily recommendation run
 `;
 
@@ -70,6 +75,8 @@ export async function runCli(args: string[], deps: CliDeps = {}): Promise<string
     }
     case "douban-sync":
       return await runDoubanSync(env);
+    case "netease-sync":
+      return await runNeteaseSync(env, createNeteaseApiClient);
     case "run-once":
       if (flags.includes("--dry-run")) {
         const baseUrl = env.NETEASE_API_BASE_URL;
@@ -118,7 +125,7 @@ function loadLongTermWorks(dbPath: string | undefined): DoubanBaselineWorkRecord
   }
   const db = new DbClient(dbPath);
   db.initSchema();
-  const songs = db.listDoubanBaselineSongs(1000);
+  const songs = mergeWorkRows(db.listDoubanBaselineSongs(1000), db.listNeteaseBaselineSongs(1000), 1000);
   db.close();
   return songs;
 }
@@ -228,6 +235,60 @@ async function runDoubanSync(env: NodeJS.ProcessEnv): Promise<string> {
   return `douban-sync imported=${imported} total=${total}`;
 }
 
+async function runNeteaseSync(
+  env: NodeJS.ProcessEnv,
+  createNeteaseApiClient: (baseUrl: string) => NeteaseCliApi
+): Promise<string> {
+  const dbPath = env.DB_PATH;
+  if (!dbPath) {
+    throw new Error("DB_PATH is required for netease-sync");
+  }
+
+  const baseUrl = env.NETEASE_API_BASE_URL;
+  if (!baseUrl) {
+    throw new Error("NETEASE_API_BASE_URL is required for netease-sync");
+  }
+
+  const cookie = loadPersistedCookie(env) ?? env.NETEASE_COOKIE;
+  if (!cookie) {
+    throw new Error("Netease cookie is required for netease-sync");
+  }
+
+  const db = openDb(dbPath);
+  if (!db) {
+    throw new Error("failed to open database for netease-sync");
+  }
+
+  const existingCount = db.countNeteaseBaselineSongs();
+  const missingPreferredSongIdCount = db.countNeteaseBaselineSongsWithoutPreferredSongId();
+  if (existingCount > 0 && missingPreferredSongIdCount === 0) {
+    db.close();
+    return `netease-sync skipped=already-imported existing=${existingCount}`;
+  }
+
+  const api = createNeteaseApiClient(baseUrl);
+  const profile = await api.getLoginProfile(cookie);
+  if (!profile.userId) {
+    db.close();
+    throw new Error("netease-sync could not resolve current user id");
+  }
+
+  const likedSongIds = await api.getLikedSongIds(profile.userId, cookie);
+  const details = await fetchNeteaseSongDetails(api, likedSongIds, cookie);
+  for (const detail of details) {
+    db.upsertNeteaseBaselineSong({
+      title: detail.title,
+      artist: detail.artist,
+      preferredSongId: detail.songId,
+      tags: ["netease:liked"]
+    });
+  }
+
+  const total = db.countNeteaseBaselineSongs();
+  db.close();
+  return `netease-sync imported=${details.length} total=${total} backfilled=${missingPreferredSongIdCount}`;
+}
+
 async function resolveLongTermWorkSongIdsFromApi(
   env: NodeJS.ProcessEnv,
   works: DoubanBaselineWorkRecord[]
@@ -242,6 +303,14 @@ async function resolveLongTermWorkSongIdsFromApi(
   const seen = new Set<string>();
 
   for (const work of works) {
+    if (work.preferredSongId) {
+      if (!seen.has(work.preferredSongId)) {
+        seen.add(work.preferredSongId);
+        resolved.push(work.preferredSongId);
+      }
+      continue;
+    }
+
     const matches = await api.searchSongIds(`${work.title} ${work.artist}`, 3);
     for (const songId of matches) {
       if (seen.has(songId)) {
@@ -254,4 +323,40 @@ async function resolveLongTermWorkSongIdsFromApi(
   }
 
   return resolved;
+}
+
+async function fetchNeteaseSongDetails(api: NeteaseCliApi, songIds: string[], cookie: string): Promise<NeteaseSongDetail[]> {
+  const deduped = Array.from(new Set(songIds));
+  const details: NeteaseSongDetail[] = [];
+  const batchSize = 20;
+
+  for (let index = 0; index < deduped.length; index += batchSize) {
+    const batch = deduped.slice(index, index + batchSize);
+    details.push(...(await api.getSongsDetail(batch, cookie)));
+  }
+
+  return details;
+}
+
+function mergeWorkRows(...args: [...rows: DoubanBaselineWorkRecord[][], limit: number]): DoubanBaselineWorkRecord[] {
+  const limit = args[args.length - 1] as number;
+  const groups = args.slice(0, -1) as DoubanBaselineWorkRecord[][];
+  const merged: DoubanBaselineWorkRecord[] = [];
+  const seen = new Set<string>();
+
+  for (const rows of groups) {
+    for (const row of rows) {
+      const key = `${row.artist}\n${row.title}`.toLowerCase();
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      merged.push(row);
+      if (merged.length >= limit) {
+        return merged;
+      }
+    }
+  }
+
+  return merged;
 }

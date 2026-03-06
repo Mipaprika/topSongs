@@ -44,6 +44,7 @@ Run commands inside the app container:
 docker compose exec app npm run bootstrap-login
 docker compose exec app npm run bootstrap-login -- --check <unikey>
 docker compose exec app npm run douban-sync
+docker compose exec app npm run netease-sync
 docker compose exec app npm run run-once -- --dry-run
 ```
 
@@ -61,6 +62,8 @@ Douban baseline import reads [data/douban-baseline.json](/Users/shangliang/Docum
 
 If the file does not exist, `douban-sync` can fetch from a public Douban profile when either `DOUBAN_USER_ID` or `DOUBAN_PROFILE_URL` is provided.
 
+`netease-sync` imports your Netease liked-song baseline once, then later daily runs only need incremental events.
+
 If QR login behaves unexpectedly, see the troubleshooting section in [operations.md](/Users/shangliang/Documents/Xi/Code/topSongs/docs/operations.md).
 
 Persistent SQLite data is stored on the host at [data](/Users/shangliang/Documents/Xi/Code/topSongs/data). The database file inside the container is `/app/data/top-songs.db`.
@@ -74,8 +77,9 @@ docker compose build app
 ## Workflow
 
 1. Run `bootstrap-login` once for Netease auth.
-2. Run `douban-sync` once for baseline preference import.
-3. Schedule `run-once` daily on a server.
+2. Run `douban-sync` once for Douban baseline import.
+3. Run `netease-sync` once for Netease liked-song baseline import.
+4. Schedule `run-once` daily on a server.
 
 ## Verification (2026-03-06)
 

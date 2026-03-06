@@ -22,6 +22,8 @@ When using Docker Compose:
 4. On `qr-status=AUTHORIZED`, the app automatically encrypts and stores the normalized cookie in the SQLite database
 5. Run one-time Douban import:
    - `docker compose exec app npm run douban-sync`
+6. Run one-time Netease baseline import:
+   - `docker compose exec app npm run netease-sync`
 
 ### Douban Baseline File
 
@@ -48,6 +50,17 @@ If the JSON file does not exist, `douban-sync` can fetch directly from a public 
 - `DOUBAN_PROFILE_URL=https://www.douban.com/people/sample_user_01`
 
 In that mode, the command first generates [data/douban-baseline.json](/Users/shangliang/Documents/Xi/Code/topSongs/data/douban-baseline.json), then imports it into SQLite.
+
+### Netease Baseline Import
+
+`netease-sync` imports your current Netease liked songs into `netease_baseline_songs`.
+
+The import is intentionally one-time:
+
+- if `netease_baseline_songs` is empty, the liked songs are imported
+- if the table already has data, `netease-sync` returns `skipped=already-imported`
+
+The command reads the encrypted cookie from SQLite first. If the database has no stored cookie yet, it falls back to `NETEASE_COOKIE`.
 
 ### QR Login Troubleshooting
 
@@ -96,7 +109,8 @@ If the response contains `account: null` and `profile: null`, the cookie is not 
 - Execute daily job manually: `docker compose exec app npm run run-once`
 - Dry-run with real data: `docker compose exec app npm run run-once -- --dry-run`
 - Run with scheduler on server after compose is up
-- Real runs use the same `.env` credentials and the container-internal `netease-api` endpoint
+- Real runs merge `douban_baseline_songs`, `netease_baseline_songs`, and recent incremental events
+- Daily runs only fetch incremental events; the two baselines stay fixed unless you explicitly rebuild them
 
 ## Auth Expiry
 

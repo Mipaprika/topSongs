@@ -103,4 +103,71 @@ describe("NeteaseApiClient", () => {
     const cookie = await client.refreshCookie("MUSIC_U=old-cookie");
     expect(cookie).toBe("MUSIC_U=next-cookie");
   });
+
+  it("reads login profile and liked song ids", async () => {
+    const fetchFn: typeof fetch = async (input) => {
+      const url = String(input);
+
+      if (url.includes("/login/status")) {
+        return jsonResponse({
+          code: 200,
+          data: {
+            profile: {
+              userId: 42
+            }
+          }
+        });
+      }
+
+      if (url.includes("/likelist")) {
+        return jsonResponse({
+          code: 200,
+          ids: [11, "12"]
+        });
+      }
+
+      throw new Error(`unexpected url: ${url}`);
+    };
+
+    const client = new NeteaseApiClient({
+      baseUrl: "https://ncm.example.com",
+      fetchFn
+    });
+
+    await expect(client.getLoginProfile("MUSIC_U=live")).resolves.toEqual({ userId: "42" });
+    await expect(client.getLikedSongIds("42", "MUSIC_U=live")).resolves.toEqual(["11", "12"]);
+  });
+
+  it("reads song detail into work-level metadata", async () => {
+    const fetchFn: typeof fetch = async (input) => {
+      const url = String(input);
+      expect(url).toContain("/song/detail");
+
+      return jsonResponse({
+        code: 200,
+        songs: [
+          {
+            id: 11,
+            name: "Yellow",
+            ar: [{ name: "Coldplay" }]
+          },
+          {
+            id: 12,
+            name: "Fix You",
+            artists: [{ name: "Coldplay" }]
+          }
+        ]
+      });
+    };
+
+    const client = new NeteaseApiClient({
+      baseUrl: "https://ncm.example.com",
+      fetchFn
+    });
+
+    await expect(client.getSongsDetail(["11", "12"])).resolves.toEqual([
+      { songId: "11", title: "Yellow", artist: "Coldplay" },
+      { songId: "12", title: "Fix You", artist: "Coldplay" }
+    ]);
+  });
 });

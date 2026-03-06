@@ -3,6 +3,7 @@ import {
   type FetchEventsResult,
   type NeteaseApiClientOptions,
   type NeteaseRawEvent,
+  type NeteaseSongDetail,
   type QrCheckResult,
   type QrLoginPayload
 } from "./types";
@@ -187,6 +188,70 @@ export class NeteaseApiClient {
     return songs.map(extractSongId).filter((songId): songId is string => songId !== null);
   }
 
+  async getLoginProfile(cookie: string): Promise<{ userId: string | null }> {
+    const body = await this.requestJson<
+      NeteaseResponseEnvelope<{
+        account?: { id?: string | number };
+        profile?: { userId?: string | number };
+      }>
+    >("/login/status", {
+      query: {
+        timestamp: Date.now()
+      },
+      cookie
+    });
+
+    const accountId = body.data?.account?.id;
+    const profileUserId = body.data?.profile?.userId;
+    const userId = profileUserId ?? accountId;
+    if (typeof userId === "string" || typeof userId === "number") {
+      return { userId: String(userId) };
+    }
+    return { userId: null };
+  }
+
+  async getLikedSongIds(userId: string, cookie: string): Promise<string[]> {
+    const body = await this.requestJson<NeteaseResponseEnvelope<{ ids?: Array<string | number> }>>("/likelist", {
+      query: {
+        uid: userId,
+        timestamp: Date.now()
+      },
+      cookie
+    });
+
+    const ids = body.ids ?? body.data?.ids ?? [];
+    if (!Array.isArray(ids)) {
+      return [];
+    }
+
+    return ids
+      .map((id) => (typeof id === "string" || typeof id === "number" ? String(id) : null))
+      .filter((songId): songId is string => songId !== null);
+  }
+
+  async getSongsDetail(songIds: string[], cookie?: string): Promise<NeteaseSongDetail[]> {
+    if (songIds.length === 0) {
+      return [];
+    }
+
+    const body = await this.requestJson<NeteaseResponseEnvelope<{ songs?: unknown[] }>>("/song/detail", {
+      query: {
+        ids: songIds.join(","),
+        timestamp: Date.now()
+      },
+      cookie
+    });
+
+    const songs = body.songs ?? body.data?.songs ?? [];
+    if (!Array.isArray(songs)) {
+      return [];
+    }
+
+    return songs
+      .map(toSongDetail)
+      .filter((song): song is NeteaseSongDetail => song !== null);
+  }
+
   async updatePlaylistTracks(
     playlistId: string,
     op: "add" | "del",
@@ -281,6 +346,37 @@ function toRawEvent(event: unknown): NeteaseRawEvent | null {
     id: String(raw.id),
     eventTime,
     json: raw.json
+  };
+}
+
+function toSongDetail(song: unknown): NeteaseSongDetail | null {
+  if (typeof song !== "object" || song === null) {
+    return null;
+  }
+
+  const obj = song as Record<string, unknown>;
+  const id = extractSongId(obj);
+  const title = typeof obj.name === "string" ? obj.name.trim() : "";
+  const artists = Array.isArray(obj.ar) ? obj.ar : Array.isArray(obj.artists) ? obj.artists : [];
+  const artist = artists
+    .map((item) => {
+      if (typeof item !== "object" || item === null) {
+        return null;
+      }
+      const name = (item as { name?: unknown }).name;
+      return typeof name === "string" ? name.trim() : null;
+    })
+    .filter((name): name is string => Boolean(name))
+    .join(", ");
+
+  if (!id || !title || !artist) {
+    return null;
+  }
+
+  return {
+    songId: id,
+    title,
+    artist
   };
 }
 

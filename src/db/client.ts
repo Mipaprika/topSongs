@@ -24,6 +24,14 @@ export interface DoubanBaselineSongInput {
 export interface DoubanBaselineWorkRecord {
   title: string;
   artist: string;
+  preferredSongId?: string | null;
+  tags: string[];
+}
+
+export interface NeteaseBaselineSongInput {
+  title: string;
+  artist: string;
+  preferredSongId?: string | null;
   tags: string[];
 }
 
@@ -64,6 +72,7 @@ export class DbClient {
     const schemaSql = readFileSync(schemaPath, "utf8");
     this.db.exec(schemaSql);
     this.migrateLegacyDoubanBaselineSongs();
+    this.migrateNeteaseBaselineSongs();
   }
 
   createRecommendationRun(input: CreateRecommendationRunInput): RecommendationRunRecord {
@@ -123,6 +132,54 @@ export class DbClient {
     return rows.map((row) => ({
       title: row.title,
       artist: row.artist,
+      preferredSongId: null,
+      tags: JSON.parse(row.tags) as string[]
+    }));
+  }
+
+  upsertNeteaseBaselineSong(input: NeteaseBaselineSongInput): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO netease_baseline_songs (title, artist, preferred_song_id, tags)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(artist, title) DO UPDATE SET
+        preferred_song_id = excluded.preferred_song_id,
+        tags = excluded.tags,
+        updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    `);
+    stmt.run(input.title, input.artist, input.preferredSongId ?? null, JSON.stringify(input.tags));
+  }
+
+  countNeteaseBaselineSongs(): number {
+    const stmt = this.db.prepare(`
+      SELECT COUNT(*) AS total
+      FROM netease_baseline_songs
+    `);
+    const row = stmt.get() as { total: number };
+    return row.total;
+  }
+
+  countNeteaseBaselineSongsWithoutPreferredSongId(): number {
+    const stmt = this.db.prepare(`
+      SELECT COUNT(*) AS total
+      FROM netease_baseline_songs
+      WHERE preferred_song_id IS NULL OR preferred_song_id = ''
+    `);
+    const row = stmt.get() as { total: number };
+    return row.total;
+  }
+
+  listNeteaseBaselineSongs(limit: number): DoubanBaselineWorkRecord[] {
+    const stmt = this.db.prepare(`
+      SELECT title, artist, preferred_song_id AS preferredSongId, tags
+      FROM netease_baseline_songs
+      ORDER BY updated_at DESC
+      LIMIT ?
+    `);
+    const rows = stmt.all(limit) as Array<{ title: string; artist: string; preferredSongId: string | null; tags: string }>;
+    return rows.map((row) => ({
+      title: row.title,
+      artist: row.artist,
+      preferredSongId: row.preferredSongId,
       tags: JSON.parse(row.tags) as string[]
     }));
   }
@@ -207,6 +264,19 @@ export class DbClient {
       FROM douban_baseline_songs_legacy;
 
       DROP TABLE douban_baseline_songs_legacy;
+    `);
+  }
+
+  private migrateNeteaseBaselineSongs(): void {
+    const columns = this.db.prepare(`PRAGMA table_info(netease_baseline_songs)`).all() as Array<{ name: string }>;
+    const hasPreferredSongId = columns.some((column) => column.name === "preferred_song_id");
+    if (hasPreferredSongId) {
+      return;
+    }
+
+    this.db.exec(`
+      ALTER TABLE netease_baseline_songs
+      ADD COLUMN preferred_song_id TEXT;
     `);
   }
 }

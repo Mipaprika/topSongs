@@ -9,6 +9,7 @@
     "build": "tsc -p tsconfig.json",
     "bootstrap-login": "tsx src/index.ts bootstrap-login",
     "douban-sync": "tsx src/index.ts douban-sync",
+    "netease-sync": "tsx src/index.ts netease-sync",
     "run-once": "tsx src/index.ts run-once"
   },
   "devDependencies": {

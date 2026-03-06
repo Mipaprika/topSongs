@@ -22,6 +22,15 @@ CREATE TABLE IF NOT EXISTS douban_baseline_songs (
   PRIMARY KEY (artist, title)
 );
 
+CREATE TABLE IF NOT EXISTS netease_baseline_songs (
+  title TEXT NOT NULL,
+  artist TEXT NOT NULL,
+  preferred_song_id TEXT,
+  tags TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  PRIMARY KEY (artist, title)
+);
+
 CREATE TABLE IF NOT EXISTS netease_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   idempotency_key TEXT NOT NULL UNIQUE,

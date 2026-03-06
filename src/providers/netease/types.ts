@@ -43,3 +43,9 @@ export interface FetchEventsResult {
   nextCursor: string;
   rawEvents: NeteaseRawEvent[];
 }
+
+export interface NeteaseSongDetail {
+  songId: string;
+  title: string;
+  artist: string;
+}

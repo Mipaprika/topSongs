@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { runCli } from "../src/cli";
 import { DbClient } from "../src/db/client";
+import type { QrCheckResult } from "../src/providers/netease/types";
 import { CredentialStore } from "../src/security/credential-store";
 
 const tempDirs: string[] = [];
@@ -20,6 +21,7 @@ describe("runCli", () => {
     const out = await runCli(["--help"]);
     expect(out).toContain("bootstrap-login");
     expect(out).toContain("douban-sync");
+    expect(out).toContain("netease-sync");
     expect(out).toContain("run-once");
   });
 
@@ -49,15 +51,12 @@ describe("runCli", () => {
 
   it("returns qr payload for bootstrap-login", async () => {
     const out = await runCli(["bootstrap-login"], {
-      createNeteaseApiClient: () => ({
+      createNeteaseApiClient: () => createApiStub({
         async createQrLogin() {
           return {
             unikey: "u1",
             qrurl: "https://music.163.com/login?codekey=u1"
           };
-        },
-        async checkQrLogin() {
-          return { status: "WAITING_SCAN" as const };
         }
       })
     });
@@ -68,13 +67,7 @@ describe("runCli", () => {
 
   it("returns normalized cookie for bootstrap-login check", async () => {
     const out = await runCli(["bootstrap-login", "--check", "u1"], {
-      createNeteaseApiClient: () => ({
-        async createQrLogin() {
-          return {
-            unikey: "u1",
-            qrurl: "https://music.163.com/login?codekey=u1"
-          };
-        },
+      createNeteaseApiClient: () => createApiStub({
         async checkQrLogin() {
           return {
             status: "AUTHORIZED" as const,
@@ -102,13 +95,7 @@ describe("runCli", () => {
         DB_PATH: dbPath,
         MASTER_KEY: masterKey
       } as NodeJS.ProcessEnv,
-      createNeteaseApiClient: () => ({
-        async createQrLogin() {
-          return {
-            unikey: "u1",
-            qrurl: "https://music.163.com/login?codekey=u1"
-          };
-        },
+      createNeteaseApiClient: () => createApiStub({
         async checkQrLogin() {
           return {
             status: "AUTHORIZED" as const,
@@ -187,6 +174,69 @@ describe("runCli", () => {
     db.close();
   });
 
+  it("imports netease liked songs baseline only once", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "top-songs-netease-cli-"));
+    tempDirs.push(dir);
+
+    const dbPath = join(dir, "app.sqlite");
+    const masterKey = "test-master-key-32bytes-min";
+    const db = new DbClient(dbPath);
+    db.initSchema();
+    const store = new CredentialStore(masterKey);
+    db.upsertNeteaseAuthState({
+      encryptedCookie: store.encrypt({ cookie: "MUSIC_U=live; __csrf=token" })
+    });
+    db.close();
+
+    const firstOut = await runCli(["netease-sync"], {
+      env: {
+        DB_PATH: dbPath,
+        MASTER_KEY: masterKey,
+        NETEASE_API_BASE_URL: "http://localhost:3000"
+      } as NodeJS.ProcessEnv,
+      createNeteaseApiClient: () =>
+        createApiStub({
+          async getLoginProfile() {
+            return { userId: "42" };
+          },
+          async getLikedSongIds() {
+            return ["1", "2"];
+          },
+          async getSongsDetail(songIds) {
+            expect(songIds).toEqual(["1", "2"]);
+            return [
+              { songId: "1", title: "Song A", artist: "Artist A" },
+              { songId: "2", title: "Song B", artist: "Artist B" }
+            ];
+          }
+        })
+    });
+
+    expect(firstOut).toContain("imported=2");
+
+    const verifyDb = new DbClient(dbPath);
+    verifyDb.initSchema();
+    expect(verifyDb.countNeteaseBaselineSongs()).toBe(2);
+    expect(verifyDb.listNeteaseBaselineSongs(10)).toEqual(
+      expect.arrayContaining([
+        { title: "Song A", artist: "Artist A", preferredSongId: "1", tags: ["netease:liked"] },
+        { title: "Song B", artist: "Artist B", preferredSongId: "2", tags: ["netease:liked"] }
+      ])
+    );
+
+    const secondOut = await runCli(["netease-sync"], {
+      env: {
+        DB_PATH: dbPath,
+        MASTER_KEY: masterKey,
+        NETEASE_API_BASE_URL: "http://localhost:3000"
+      } as NodeJS.ProcessEnv,
+      createNeteaseApiClient: () => createApiStub()
+    });
+
+    expect(secondOut).toContain("skipped=already-imported");
+    verifyDb.close();
+  });
+
   it("resolves long-term works into song candidates for live dry run", async () => {
     const dir = mkdtempSync(join(tmpdir(), "top-songs-longterm-cli-"));
     tempDirs.push(dir);
@@ -198,6 +248,11 @@ describe("runCli", () => {
       title: "Back To Bedlam",
       artist: "James Blunt",
       tags: ["douban:collect", "摇滚"]
+    });
+    db.upsertNeteaseBaselineSong({
+      title: "Yellow",
+      artist: "Coldplay",
+      tags: ["netease:liked"]
     });
     db.close();
 
@@ -212,24 +267,67 @@ describe("runCli", () => {
           {
             title: "Back To Bedlam",
             artist: "James Blunt",
+            preferredSongId: null,
             tags: ["douban:collect", "摇滚"]
+          },
+          {
+            title: "Yellow",
+            artist: "Coldplay",
+            preferredSongId: null,
+            tags: ["netease:liked"]
           }
         ]);
-        return ["song-1"];
+        return ["song-1", "song-2"];
       },
       runOnceLiveDryRun: async (input) => {
-        expect(input.longTermSongIds).toEqual(["song-1"]);
+        expect(input.longTermSongIds).toEqual(["song-1", "song-2"]);
         return {
-          selectedCount: 1,
-          candidates: 1,
+          selectedCount: 2,
+          candidates: 2,
           events: 0,
           nextCursor: "0",
-          songIds: ["song-1"]
+          songIds: ["song-1", "song-2"]
         };
       }
     });
 
-    expect(out).toContain("selectedCount=1");
-    expect(out).toContain("song-1");
+    expect(out).toContain("selectedCount=2");
+    expect(out).toContain("song-1,song-2");
   });
 });
+
+function createApiStub(overrides: Partial<{
+  createQrLogin: () => Promise<{ unikey: string; qrurl: string }>;
+  checkQrLogin: (unikey: string) => Promise<QrCheckResult>;
+  searchSongIds: (keywords: string, limit?: number) => Promise<string[]>;
+  getLoginProfile: (cookie: string) => Promise<{ userId: string | null }>;
+  getLikedSongIds: (userId: string, cookie: string) => Promise<string[]>;
+  getSongsDetail: (songIds: string[], cookie?: string) => Promise<Array<{ songId: string; title: string; artist: string }>>;
+}> = {}) {
+  return {
+    async createQrLogin() {
+      return (
+        (await overrides.createQrLogin?.()) ?? {
+          unikey: "u1",
+          qrurl: "https://music.163.com/login?codekey=u1"
+        }
+      );
+    },
+    async checkQrLogin(unikey: string) {
+      const result = await overrides.checkQrLogin?.(unikey);
+      return result ?? ({ status: "WAITING_SCAN" } satisfies QrCheckResult);
+    },
+    async searchSongIds(keywords: string, limit = 5) {
+      return (await overrides.searchSongIds?.(keywords, limit)) ?? [];
+    },
+    async getLoginProfile(cookie: string) {
+      return (await overrides.getLoginProfile?.(cookie)) ?? { userId: null };
+    },
+    async getLikedSongIds(userId: string, cookie: string) {
+      return (await overrides.getLikedSongIds?.(userId, cookie)) ?? [];
+    },
+    async getSongsDetail(songIds: string[], cookie?: string) {
+      return (await overrides.getSongsDetail?.(songIds, cookie)) ?? [];
+    }
+  };
+}
