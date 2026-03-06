@@ -29,6 +29,20 @@ export interface NeteaseEventInput {
   actionTime: number;
 }
 
+export interface NeteaseAuthStateInput {
+  encryptedCookie?: string | null;
+  pendingUnikey?: string | null;
+  pendingQrUrl?: string | null;
+}
+
+export interface NeteaseAuthStateRecord {
+  provider: string;
+  encryptedCookie: string | null;
+  pendingUnikey: string | null;
+  pendingQrUrl: string | null;
+  updatedAt: string;
+}
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const schemaPath = join(__dirname, "schema.sql");
 
@@ -126,5 +140,35 @@ export class DbClient {
     `);
     const row = stmt.get() as { total: number };
     return row.total;
+  }
+
+  upsertNeteaseAuthState(input: NeteaseAuthStateInput): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO netease_auth_state (provider, encrypted_cookie, pending_unikey, pending_qr_url)
+      VALUES ('netease', ?, ?, ?)
+      ON CONFLICT(provider) DO UPDATE SET
+        encrypted_cookie = excluded.encrypted_cookie,
+        pending_unikey = excluded.pending_unikey,
+        pending_qr_url = excluded.pending_qr_url,
+        updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    `);
+
+    stmt.run(input.encryptedCookie ?? null, input.pendingUnikey ?? null, input.pendingQrUrl ?? null);
+  }
+
+  getNeteaseAuthState(): NeteaseAuthStateRecord | null {
+    const stmt = this.db.prepare(`
+      SELECT provider,
+             encrypted_cookie AS encryptedCookie,
+             pending_unikey AS pendingUnikey,
+             pending_qr_url AS pendingQrUrl,
+             updated_at AS updatedAt
+      FROM netease_auth_state
+      WHERE provider = 'netease'
+      LIMIT 1
+    `);
+
+    const row = stmt.get() as NeteaseAuthStateRecord | undefined;
+    return row ?? null;
   }
 }

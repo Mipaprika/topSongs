@@ -30,3 +30,11 @@ CREATE TABLE IF NOT EXISTS netease_events (
   action_time INTEGER NOT NULL,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
+
+CREATE TABLE IF NOT EXISTS netease_auth_state (
+  provider TEXT PRIMARY KEY,
+  encrypted_cookie TEXT,
+  pending_unikey TEXT,
+  pending_qr_url TEXT,
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);

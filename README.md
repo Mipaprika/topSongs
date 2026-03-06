@@ -11,13 +11,14 @@ npm install
 Required `.env` fields for Netease integration:
 
 - `NETEASE_PLAYLIST_ID`: target fixed playlist id
-- `NETEASE_COOKIE`: initial cookie after QR login
 - `MASTER_KEY`: credential encryption key
 
 When running with Docker Compose, the app container overrides these values automatically:
 
 - `NETEASE_API_BASE_URL=http://netease-api:3000`
 - `DB_PATH=/app/data/top-songs.db`
+
+`NETEASE_COOKIE` is now optional for normal operation. After a successful QR login check, the service stores the normalized cookie in the SQLite database automatically.
 
 ## Commands
 

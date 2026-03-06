@@ -3,6 +3,7 @@ import { NeteaseApiClient } from "./providers/netease/api-client";
 import { createNeteaseLiveAdapters } from "./providers/netease/live-adapters";
 import { existsSync } from "node:fs";
 import { DbClient } from "./db/client";
+import { CredentialStore } from "./security/credential-store";
 
 type NeteaseBootstrapApi = Pick<NeteaseApiClient, "createQrLogin" | "checkQrLogin">;
 
@@ -45,12 +46,14 @@ export async function runCli(args: string[], deps: CliDeps = {}): Promise<string
       if (unikey) {
         const status = await api.checkQrLogin(unikey);
         if (status.status === "AUTHORIZED") {
+          persistAuthorizedCookie(env, status.cookie);
           return `qr-status=AUTHORIZED cookie=${status.cookie}`;
         }
         return `qr-status=${status.status}`;
       }
 
       const payload = await api.createQrLogin();
+      persistPendingQr(env, payload.unikey, payload.qrurl);
       return `unikey=${payload.unikey}\nqrurl=${payload.qrurl}`;
     }
     case "douban-sync":
@@ -58,7 +61,7 @@ export async function runCli(args: string[], deps: CliDeps = {}): Promise<string
     case "run-once":
       if (flags.includes("--dry-run")) {
         const baseUrl = env.NETEASE_API_BASE_URL;
-        const cookie = env.NETEASE_COOKIE;
+        const cookie = loadPersistedCookie(env) ?? env.NETEASE_COOKIE;
         if (baseUrl && cookie) {
           const adapters = createNeteaseLiveAdapters({
             session: {
@@ -105,4 +108,65 @@ function loadLongTermSongIds(dbPath: string | undefined): string[] {
   const songs = db.listDoubanBaselineSongs(1000);
   db.close();
   return songs;
+}
+
+function persistPendingQr(env: NodeJS.ProcessEnv, unikey: string, qrurl: string): void {
+  const db = openDb(env.DB_PATH);
+  if (!db) {
+    return;
+  }
+
+  db.upsertNeteaseAuthState({
+    encryptedCookie: db.getNeteaseAuthState()?.encryptedCookie ?? null,
+    pendingUnikey: unikey,
+    pendingQrUrl: qrurl
+  });
+  db.close();
+}
+
+function persistAuthorizedCookie(env: NodeJS.ProcessEnv, cookie: string): void {
+  const db = openDb(env.DB_PATH);
+  const masterKey = env.MASTER_KEY;
+  if (!db || !masterKey) {
+    db?.close();
+    return;
+  }
+
+  const store = new CredentialStore(masterKey);
+  const encryptedCookie = store.encrypt({ cookie });
+  db.upsertNeteaseAuthState({
+    encryptedCookie,
+    pendingUnikey: null,
+    pendingQrUrl: null
+  });
+  db.close();
+}
+
+function loadPersistedCookie(env: NodeJS.ProcessEnv): string | null {
+  const db = openDb(env.DB_PATH);
+  const masterKey = env.MASTER_KEY;
+  if (!db || !masterKey) {
+    db?.close();
+    return null;
+  }
+
+  const state = db.getNeteaseAuthState();
+  db.close();
+  if (!state?.encryptedCookie) {
+    return null;
+  }
+
+  const store = new CredentialStore(masterKey);
+  const payload = store.decrypt<{ cookie: string }>(state.encryptedCookie);
+  return payload.cookie;
+}
+
+function openDb(dbPath: string | undefined): DbClient | null {
+  if (!dbPath) {
+    return null;
+  }
+
+  const db = new DbClient(dbPath);
+  db.initSchema();
+  return db;
 }

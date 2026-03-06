@@ -4,7 +4,6 @@
 
 - `MASTER_KEY`: encryption key for credential store
 - `NETEASE_PLAYLIST_ID`: fixed playlist id for daily replacement
-- `NETEASE_COOKIE`: login cookie (updated after QR login success)
 - `NETEASE_EVENT_CURSOR`: last cursor for incremental events (default `0`)
 
 When using Docker Compose:
@@ -20,7 +19,7 @@ When using Docker Compose:
    - `docker compose exec app npm run bootstrap-login`
 3. Poll login status after scan:
    - `docker compose exec app npm run bootstrap-login -- --check <unikey>`
-4. Persist returned cookie to `NETEASE_COOKIE` in [`.env`](/Users/shangliang/Documents/Xi/Code/topSongs/.env)
+4. On `qr-status=AUTHORIZED`, the app automatically encrypts and stores the normalized cookie in the SQLite database
 5. Run one-time Douban import:
    - `docker compose exec app npm run douban-sync`
 
@@ -56,7 +55,7 @@ Status meanings:
 - `WAITING_SCAN`: QR code has not been scanned yet
 - `WAITING_CONFIRM`: QR code was scanned, waiting for phone confirmation
 - `EXPIRED`: discard the old `UNIKEY` and generate a new QR code
-- `AUTHORIZED`: copy the returned `cookie=...` into `NETEASE_COOKIE` in [`.env`](/Users/shangliang/Documents/Xi/Code/topSongs/.env)
+- `AUTHORIZED`: the app already stored the normalized `cookie=...` in the database; no manual `.env` update is required
 
 If `run-once -- --dry-run` returns `HttpError: 301 Moved Permanently`, verify the actual login state inside the container:
 
@@ -64,7 +63,7 @@ If `run-once -- --dry-run` returns `HttpError: 301 Moved Permanently`, verify th
 docker compose exec app node -e 'const cookie=process.env.NETEASE_COOKIE||""; fetch("http://netease-api:3000/login/status",{headers:{cookie}}).then(async r=>{console.log(await r.text())})'
 ```
 
-If the response contains `account: null` and `profile: null`, the cookie is not accepted by the current `netease-api` container. Re-run the QR login flow and update `NETEASE_COOKIE`.
+If the response contains `account: null` and `profile: null`, the cookie is not accepted by the current `netease-api` container. Re-run the QR login flow so the app can replace the stored cookie.
 
 ## Daily Run
 
