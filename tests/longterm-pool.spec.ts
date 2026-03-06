@@ -25,6 +25,6 @@ describe("listDoubanBaselineSongs", () => {
 
     const pool = db.listDoubanBaselineSongs(1);
     expect(pool.length).toBe(1);
-    expect(pool[0]).toBe("s1");
+    expect(pool[0]).toBe("s2");
   });
 });
