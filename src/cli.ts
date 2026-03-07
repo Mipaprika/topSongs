@@ -25,6 +25,7 @@ import {
 } from "./ingest/douban-public";
 import { createNotifierFromEnv } from "./notify/notifier";
 import { createRunLogger, pruneRunLogs, type RunLogger } from "./ops/run-logger";
+import { resolveNeteaseApiBaseUrl } from "./config";
 
 type NeteaseCliApi = Pick<
   NeteaseApiClient,
@@ -76,12 +77,17 @@ export async function runCli(args: string[], deps: CliDeps = {}): Promise<string
 
   switch (command) {
     case "bootstrap-login": {
-      const baseUrl = env.NETEASE_API_BASE_URL ?? "http://127.0.0.1:3000";
+      const baseUrl = resolveNeteaseApiBaseUrl(env);
       const api = createNeteaseApiClient(baseUrl);
       const unikey = readFlagValue(flags, "--check");
 
-      if (unikey) {
-        const status = await api.checkQrLogin(unikey);
+      if (flags.includes("--check")) {
+        const pending = loadPendingQr(env);
+        const resolvedUnikey = (unikey ?? pending?.pendingUnikey ?? "").trim();
+        if (!resolvedUnikey) {
+          throw new Error("missing unikey: run bootstrap-login first");
+        }
+        const status = await api.checkQrLogin(resolvedUnikey);
         if (status.status === "AUTHORIZED") {
           persistAuthorizedCookie(env, status.cookie);
           return "qr-status=AUTHORIZED cookie-stored=true";
@@ -91,7 +97,7 @@ export async function runCli(args: string[], deps: CliDeps = {}): Promise<string
 
       const payload = await api.createQrLogin();
       persistPendingQr(env, payload.unikey, payload.qrurl);
-      return `unikey=${payload.unikey}\nqrurl=${payload.qrurl}`;
+      return "qr-created pending=true";
     }
     case "douban-sync":
       return await runDoubanSync(env);
@@ -178,6 +184,22 @@ function persistAuthorizedCookie(env: NodeJS.ProcessEnv, cookie: string): void {
   db.close();
 }
 
+function loadPendingQr(env: NodeJS.ProcessEnv): { pendingUnikey: string; pendingQrUrl: string } | null {
+  const db = openDb(env.DB_PATH);
+  if (!db) {
+    return null;
+  }
+  const state = db.getNeteaseAuthState();
+  db.close();
+  if (!state?.pendingUnikey || !state?.pendingQrUrl) {
+    return null;
+  }
+  return {
+    pendingUnikey: state.pendingUnikey,
+    pendingQrUrl: state.pendingQrUrl
+  };
+}
+
 function loadPersistedCookie(env: NodeJS.ProcessEnv): string | null {
   const db = openDb(env.DB_PATH);
   const masterKey = env.MASTER_KEY;
@@ -211,7 +233,7 @@ function createLiveRunContext(
   env: NodeJS.ProcessEnv,
   createNeteaseApiClient: (baseUrl: string) => NeteaseCliApi
 ): { api: NeteaseCliApi; cookie: string } | null {
-  const baseUrl = env.NETEASE_API_BASE_URL;
+  const baseUrl = resolveNeteaseApiBaseUrl(env);
   const cookie = loadPersistedCookie(env) ?? env.NETEASE_COOKIE;
   if (!baseUrl || !cookie) {
     return null;
@@ -328,7 +350,7 @@ async function runOnceAndPublish(
 ): Promise<string> {
   const liveContext = createLiveRunContext(env, createNeteaseApiClient);
   if (!liveContext) {
-    throw new Error("NETEASE_API_BASE_URL and valid Netease cookie are required for run-once");
+    throw new Error("valid Netease cookie is required for run-once");
   }
   const notifier = createNotifierFromEnv(env);
   pruneRunLogs(env);
@@ -361,10 +383,9 @@ async function runOnceAndPublish(
       persistPendingQr(env, qr.unikey, qr.qrurl);
       await notifier.sendReloginRequired({
         unikey: qr.unikey,
-        qrurl: qr.qrurl,
-        qrimg: qr.qrimg
+        qrurl: qr.qrurl
       });
-      logger.log("WARN", "auth.expired", { reason: auth.reason, unikey: qr.unikey });
+      logger.log("WARN", "auth.expired", { reason: auth.reason });
       throw new Error("AUTH_EXPIRED: cookie invalid, relogin QR has been generated and notified.");
     }
     logger.log("INFO", "auth.refresh_ok");
@@ -486,10 +507,7 @@ async function runNeteaseSync(
     throw new Error("DB_PATH is required for netease-sync");
   }
 
-  const baseUrl = env.NETEASE_API_BASE_URL;
-  if (!baseUrl) {
-    throw new Error("NETEASE_API_BASE_URL is required for netease-sync");
-  }
+  const baseUrl = resolveNeteaseApiBaseUrl(env);
 
   const cookie = loadPersistedCookie(env) ?? env.NETEASE_COOKIE;
   if (!cookie) {

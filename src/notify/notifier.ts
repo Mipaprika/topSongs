@@ -1,9 +1,6 @@
-import { URL } from "node:url";
-
 export interface ReloginPayload {
   unikey?: string;
   qrurl?: string;
-  qrimg?: string;
 }
 
 export interface Notifier {
@@ -14,16 +11,15 @@ export interface Notifier {
 }
 
 export class ConsoleNotifier implements Notifier {
+  constructor(private readonly includeQrUrl = true) {}
+
   async sendReloginRequired(payload?: ReloginPayload): Promise<void> {
     console.error("[notify] Netease auth expired, relogin required.");
-    if (payload?.unikey) {
+    if (this.includeQrUrl && payload?.unikey) {
       console.error(`[notify] unikey=${payload.unikey}`);
     }
-    if (payload?.qrurl) {
+    if (this.includeQrUrl && payload?.qrurl) {
       console.error(`[notify] qrurl=${payload.qrurl}`);
-    }
-    if (payload?.qrimg) {
-      console.error(`[notify] qrimg=${payload.qrimg}`);
     }
   }
 
@@ -40,23 +36,28 @@ export class ConsoleNotifier implements Notifier {
   }
 }
 
-type WebhookFormat = "generic" | "feishu" | "dingtalk" | "wecom";
+type WebhookFormat = "generic" | "feishu" | "dingtalk" | "wecom" | "telegram";
 
 export class WebhookNotifier implements Notifier {
   constructor(
     private readonly webhookUrl: string,
     private readonly format: WebhookFormat = "generic",
-    private readonly fetchFn: typeof fetch = fetch
+    private readonly fetchFn: typeof fetch = fetch,
+    private readonly chatId?: string,
+    private readonly includeQrUrl = true
   ) {}
 
   async sendReloginRequired(payload?: ReloginPayload): Promise<void> {
-    const lines = ["网易云登录已失效，请重新扫码登录。"];
-    if (payload?.unikey) {
-      lines.push(`unikey: ${payload.unikey}`);
-    }
-    if (payload?.qrurl) {
-      lines.push(`qrurl: ${payload.qrurl}`);
-      lines.push(`qrimg: ${payload.qrimg ?? buildQrImageUrl(payload.qrurl, payload.unikey)}`);
+    const lines = ["网易云登录已失效，请重新登录。"];
+    if (this.includeQrUrl) {
+      if (payload?.unikey) {
+        lines.push(`unikey: ${payload.unikey}`);
+      }
+      if (payload?.qrurl) {
+        lines.push(`qrurl: ${payload.qrurl}`);
+      }
+    } else {
+      lines.push("已出于安全策略隐藏二维码链接。请在服务器上执行 bootstrap-login 获取二维码。");
     }
     await this.postText(lines.join("\n"));
   }
@@ -79,7 +80,7 @@ export class WebhookNotifier implements Notifier {
       headers: {
         "content-type": "application/json"
       },
-      body: JSON.stringify(buildWebhookBody(this.format, text))
+      body: JSON.stringify(buildWebhookBody(this.format, text, this.chatId))
     });
 
     if (!response.ok) {
@@ -89,37 +90,54 @@ export class WebhookNotifier implements Notifier {
 }
 
 export function createNotifierFromEnv(env: NodeJS.ProcessEnv): Notifier {
+  const includeQrUrl = resolveIncludeQrUrl(env);
+  const format = normalizeFormat(env.NOTIFY_WEBHOOK_FORMAT);
+  if (format === "telegram") {
+    const token = (env.NOTIFY_TELEGRAM_BOT_TOKEN ?? "").trim();
+    const chatId = (env.NOTIFY_TELEGRAM_CHAT_ID ?? env.TELEGRAM_CHAT_ID ?? "").trim();
+    if (!token || !chatId) {
+      return new ConsoleNotifier(includeQrUrl);
+    }
+    return new WebhookNotifier(`https://api.telegram.org/bot${token}/sendMessage`, "telegram", fetch, chatId, includeQrUrl);
+  }
+
   const webhookUrl = (env.NOTIFY_WEBHOOK_URL ?? "").trim();
   if (!webhookUrl) {
-    return new ConsoleNotifier();
+    return new ConsoleNotifier(includeQrUrl);
   }
-  const format = normalizeFormat(env.NOTIFY_WEBHOOK_FORMAT);
-  return new WebhookNotifier(webhookUrl, format);
+  return new WebhookNotifier(webhookUrl, format, fetch, undefined, includeQrUrl);
 }
 
-export function buildQrImageUrl(qrurl: string, unikey?: string): string {
-  const url = new URL("https://api.qrserver.com/v1/create-qr-code/");
-  url.searchParams.set("size", "320x320");
-  url.searchParams.set("data", qrurl);
-  if (unikey) {
-    url.searchParams.set("t", unikey);
+function resolveIncludeQrUrl(env: NodeJS.ProcessEnv): boolean {
+  const raw = (env.NOTIFY_INCLUDE_QRURL ?? "").trim().toLowerCase();
+  if (raw === "false" || raw === "0" || raw === "off") {
+    return false;
   }
-  return url.toString();
+  return true;
 }
 
 function normalizeFormat(value: string | undefined): WebhookFormat {
   const normalized = (value ?? "").trim().toLowerCase();
-  if (normalized === "feishu" || normalized === "dingtalk" || normalized === "wecom") {
+  if (normalized === "feishu" || normalized === "dingtalk" || normalized === "wecom" || normalized === "telegram") {
     return normalized;
   }
   return "generic";
 }
 
-function buildWebhookBody(format: WebhookFormat, text: string): Record<string, unknown> {
+function buildWebhookBody(format: WebhookFormat, text: string, chatId?: string): Record<string, unknown> {
   if (format === "feishu") {
     return {
       msg_type: "text",
       content: { text }
+    };
+  }
+  if (format === "telegram") {
+    if (!chatId) {
+      throw new Error("telegram chat_id is required");
+    }
+    return {
+      chat_id: chatId,
+      text
     };
   }
   if (format === "dingtalk" || format === "wecom") {

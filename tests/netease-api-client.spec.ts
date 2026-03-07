@@ -40,7 +40,7 @@ describe("NeteaseApiClient", () => {
     };
 
     const client = new NeteaseApiClient({
-      baseUrl: "https://ncm.example.com",
+      baseUrl: "http://127.0.0.1:3000",
       fetchFn
     });
 
@@ -68,7 +68,7 @@ describe("NeteaseApiClient", () => {
     };
 
     const client = new NeteaseApiClient({
-      baseUrl: "https://ncm.example.com",
+      baseUrl: "http://127.0.0.1:3000",
       fetchFn
     });
 
@@ -96,7 +96,7 @@ describe("NeteaseApiClient", () => {
     };
 
     const client = new NeteaseApiClient({
-      baseUrl: "https://ncm.example.com",
+      baseUrl: "http://127.0.0.1:3000",
       fetchFn
     });
 
@@ -130,7 +130,7 @@ describe("NeteaseApiClient", () => {
     };
 
     const client = new NeteaseApiClient({
-      baseUrl: "https://ncm.example.com",
+      baseUrl: "http://127.0.0.1:3000",
       fetchFn
     });
 
@@ -161,7 +161,7 @@ describe("NeteaseApiClient", () => {
     };
 
     const client = new NeteaseApiClient({
-      baseUrl: "https://ncm.example.com",
+      baseUrl: "http://127.0.0.1:3000",
       fetchFn
     });
 
@@ -183,7 +183,7 @@ describe("NeteaseApiClient", () => {
     };
 
     const client = new NeteaseApiClient({
-      baseUrl: "https://ncm.example.com",
+      baseUrl: "http://127.0.0.1:3000",
       fetchFn
     });
 
@@ -212,7 +212,7 @@ describe("NeteaseApiClient", () => {
     };
 
     const client = new NeteaseApiClient({
-      baseUrl: "https://ncm.example.com",
+      baseUrl: "http://127.0.0.1:3000",
       fetchFn
     });
 

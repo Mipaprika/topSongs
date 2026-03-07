@@ -18,7 +18,10 @@ Required `.env` fields for Netease integration:
 - `AI_CANDIDATE_POOL_LIMIT`: optional, default `120`
 - `MASTER_KEY`: credential encryption key
 - `NOTIFY_WEBHOOK_URL`: optional, webhook for auth-expired / job-failed / low-count alerts
-- `NOTIFY_WEBHOOK_FORMAT`: optional, `generic` | `feishu` | `dingtalk` | `wecom` (default `generic`)
+- `NOTIFY_WEBHOOK_FORMAT`: optional, `telegram` | `generic` | `feishu` | `dingtalk` | `wecom` (default `generic`)
+- `NOTIFY_TELEGRAM_BOT_TOKEN`: required when `NOTIFY_WEBHOOK_FORMAT=telegram`
+- `NOTIFY_TELEGRAM_CHAT_ID`: required when `NOTIFY_WEBHOOK_FORMAT=telegram`
+- `NOTIFY_INCLUDE_QRURL`: optional, default `false`; set `true` only if you accept sending qrurl/unikey in notifications
 - `RUN_LOG_PATH`: optional, JSONL run log path (default: `<DB_PATH dirname>/run.log`)
 - `RUN_LOG_RETENTION_HOURS`: optional, log retention window, default `24`
 
@@ -51,7 +54,7 @@ Run commands inside the app container:
 
 ```bash
 docker compose exec app npm run bootstrap-login
-docker compose exec app npm run bootstrap-login -- --check <unikey>
+docker compose exec app npm run bootstrap-login -- --check
 docker compose exec app npm run douban-sync
 docker compose exec app npm run netease-sync
 docker compose exec app npm run run-once -- --dry-run

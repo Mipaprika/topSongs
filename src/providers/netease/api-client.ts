@@ -7,6 +7,7 @@ import {
   type QrCheckResult,
   type QrLoginPayload
 } from "./types";
+import { validateNeteaseApiBaseUrl } from "../../config";
 
 interface RequestOptions {
   method?: "GET" | "POST";
@@ -35,7 +36,7 @@ export class NeteaseApiClient {
   private readonly fetchFn: typeof fetch;
 
   constructor(options: NeteaseApiClientOptions) {
-    this.baseUrl = options.baseUrl.replace(/\/+$/, "");
+    this.baseUrl = validateNeteaseApiBaseUrl(options.baseUrl).replace(/\/+$/, "");
     this.fetchFn = options.fetchFn ?? fetch;
   }
 

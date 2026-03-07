@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="$ROOT_DIR/.env"
@@ -10,6 +11,16 @@ need_cmd() {
     echo "缺少命令: $1"
     exit 1
   fi
+}
+
+send_telegram_message() {
+  local bot_token="$1"
+  local chat_id="$2"
+  local message="$3"
+  local api="https://api.telegram.org/bot${bot_token}/sendMessage"
+  curl -fsS -X POST "$api" \
+    --data-urlencode "chat_id=${chat_id}" \
+    --data-urlencode "text=${message}" >/dev/null
 }
 
 prompt() {
@@ -47,6 +58,7 @@ upsert_env() {
   value="$(format_env_value "$raw_value")"
 
   touch "$ENV_FILE"
+  chmod 600 "$ENV_FILE"
   local tmp
   tmp="$(mktemp)"
   awk -v k="$key" -v v="$value" '
@@ -64,6 +76,7 @@ upsert_env() {
     }
   ' "$ENV_FILE" > "$tmp"
   mv "$tmp" "$ENV_FILE"
+  chmod 600 "$ENV_FILE"
 }
 
 get_env_value() {
@@ -92,27 +105,47 @@ install_cron() {
 }
 
 bootstrap_qr() {
+  local bot_token="$1"
+  local chat_id="$2"
   echo
-  echo "正在生成网易云登录二维码..."
-  local out
-  out="$(cd "$ROOT_DIR" && docker compose exec -T app npm run bootstrap-login | tr -d '\r')"
-  echo "$out"
+  echo "正在生成网易云登录二维码并发送到 Telegram..."
+  cd "$ROOT_DIR" && docker compose exec -T app npm run bootstrap-login >/dev/null
+
+  local parsed
+  parsed="$(python3 - <<PY
+import sqlite3
+from pathlib import Path
+db = Path("$ROOT_DIR/data/top-songs.db")
+if not db.exists():
+    print("|")
+    raise SystemExit(0)
+conn = sqlite3.connect(str(db))
+try:
+    row = conn.execute("SELECT pending_unikey, pending_qr_url FROM netease_auth_state WHERE provider='netease' LIMIT 1").fetchone()
+finally:
+    conn.close()
+if not row or not row[0] or not row[1]:
+    print("|")
+else:
+    print(f"{row[0]}|{row[1]}")
+PY
+)"
 
   local unikey
   local qrurl
-  unikey="$(printf '%s\n' "$out" | sed -n 's/^unikey=//p' | tail -n1)"
-  qrurl="$(printf '%s\n' "$out" | sed -n 's/^qrurl=//p' | tail -n1)"
+  unikey="${parsed%%|*}"
+  qrurl="${parsed#*|}"
   if [[ -n "$unikey" && -n "$qrurl" ]]; then
-    echo
-    echo "扫码链接（可直接在手机浏览器打开）:"
-    echo "https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=$(python3 - <<PY
-import urllib.parse
-print(urllib.parse.quote(\"\"\"$qrurl\"\"\", safe=\"\"))
-PY
-)"
-    echo
-    echo "扫码并在手机确认后，执行："
-    echo "docker compose exec app npm run bootstrap-login -- --check $unikey"
+    local msg
+    msg=$'网易云登录二维码已生成，请在可信设备打开下面链接并完成扫码确认。\n\n'"$qrurl"$'\n\n扫码确认后，回到服务器执行：\n'"docker compose exec app npm run bootstrap-login -- --check"
+    if send_telegram_message "$bot_token" "$chat_id" "$msg"; then
+      echo "已发送到 Telegram，请在手机上完成扫码。"
+      echo "然后执行：docker compose exec app npm run bootstrap-login -- --check"
+    else
+      echo "发送 Telegram 失败。请手动执行 bootstrap-login 查看链接。"
+    fi
+  else
+    echo "未能解析 unikey/qrurl，请手动执行 bootstrap-login 检查。"
   fi
 }
 
@@ -122,6 +155,7 @@ main() {
   need_cmd awk
   need_cmd sed
   need_cmd python3
+  need_cmd curl
 
   cd "$ROOT_DIR"
   mkdir -p "$ROOT_DIR/data"
@@ -202,9 +236,6 @@ PY
 )"
   fi
 
-  local notify_webhook
-  notify_webhook="https://api.telegram.org/bot${telegram_bot_token}/sendMessage?chat_id=${telegram_chat_id}"
-
   upsert_env "MASTER_KEY" "$master_key"
   upsert_env "NETEASE_PLAYLIST_ID" "$playlist_id"
   upsert_env "DOUBAN_PROFILE_URL" "$douban_profile"
@@ -212,12 +243,14 @@ PY
   upsert_env "LLM_API_KEY" "$llm_api_key"
   upsert_env "LLM_MODEL" "$model"
   upsert_env "LLM_BASE_URL" "$base_url"
-  upsert_env "NOTIFY_WEBHOOK_FORMAT" "generic"
-  upsert_env "NOTIFY_WEBHOOK_URL" "$notify_webhook"
+  upsert_env "NOTIFY_WEBHOOK_FORMAT" "telegram"
+  upsert_env "NOTIFY_TELEGRAM_BOT_TOKEN" "$telegram_bot_token"
+  upsert_env "NOTIFY_TELEGRAM_CHAT_ID" "$telegram_chat_id"
   upsert_env "TELEGRAM_CHAT_ID" "$telegram_chat_id"
   upsert_env "RUN_LOG_RETENTION_HOURS" "24"
   upsert_env "AI_REQUEST_TIMEOUT_MS" "120000"
   upsert_env "AI_REQUEST_RETRY_COUNT" "2"
+  chmod 600 "$ENV_FILE"
 
   echo
   echo "已写入 .env（敏感值已覆盖更新）。"
@@ -236,9 +269,8 @@ PY
   local do_qr
   do_qr="$(prompt "现在要执行一次网易云扫码登录引导吗? (y/n)" "y")"
   if [[ "$do_qr" =~ ^[Yy]$ ]]; then
-    bootstrap_qr
+    bootstrap_qr "$telegram_bot_token" "$telegram_chat_id"
   fi
 }
 
 main "$@"
-

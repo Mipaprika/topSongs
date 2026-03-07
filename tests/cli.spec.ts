@@ -62,8 +62,7 @@ describe("runCli", () => {
       })
     });
 
-    expect(out).toContain("unikey=u1");
-    expect(out).toContain("qrurl=https://music.163.com/login?codekey=u1");
+    expect(out).toBe("qr-created pending=true");
   });
 
   it("returns normalized cookie for bootstrap-login check", async () => {
@@ -91,7 +90,22 @@ describe("runCli", () => {
     db.initSchema();
     db.close();
 
-    const authOut = await runCli(["bootstrap-login", "--check", "u1"], {
+    await runCli(["bootstrap-login"], {
+      env: {
+        DB_PATH: dbPath,
+        MASTER_KEY: masterKey
+      } as NodeJS.ProcessEnv,
+      createNeteaseApiClient: () => createApiStub({
+        async createQrLogin() {
+          return {
+            unikey: "u1",
+            qrurl: "https://music.163.com/login?codekey=u1"
+          };
+        }
+      })
+    });
+
+    const authOut = await runCli(["bootstrap-login", "--check"], {
       env: {
         DB_PATH: dbPath,
         MASTER_KEY: masterKey

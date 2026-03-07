@@ -20,10 +20,10 @@ When using Docker Compose:
 ## Bootstrap
 
 1. Build and start services: `docker compose up -d --build`
-2. Start QR login bootstrap and get QR URL:
+2. Start QR login bootstrap (the service stores pending QR metadata internally and does not print sensitive links):
    - `docker compose exec app npm run bootstrap-login`
 3. Poll login status after scan:
-   - `docker compose exec app npm run bootstrap-login -- --check <unikey>`
+   - `docker compose exec app npm run bootstrap-login -- --check`
 4. On `qr-status=AUTHORIZED`, the app automatically encrypts and stores the normalized cookie in the SQLite database
 5. Run one-time Douban import:
    - `docker compose exec app npm run douban-sync`
@@ -69,29 +69,17 @@ The command reads the encrypted cookie from SQLite first. If the database has no
 
 ### QR Login Troubleshooting
 
-If `bootstrap-login -- --check <unikey>` returns `WAITING_SCAN`, `EXPIRED`, or you suspect the wrong QR code was scanned, avoid copying `unikey` and `qrurl` by hand. Generate and open the QR image from the same command output:
+If `bootstrap-login -- --check` returns `WAITING_SCAN`, `EXPIRED`, or you suspect the wrong QR code was scanned:
 
 ```bash
-OUT="$(docker compose exec app npm run bootstrap-login | tr -d '\r')"
-echo "$OUT"
-
-UNIKEY="$(printf '%s\n' "$OUT" | sed -n 's/^unikey=//p')"
-QRURL="$(printf '%s\n' "$OUT" | sed -n 's/^qrurl=//p')"
-
-python3 - <<PY
-import urllib.parse, webbrowser
-qrurl = """$QRURL"""
-img = "https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=" + urllib.parse.quote(qrurl, safe="") + "&t=" + urllib.parse.quote("$UNIKEY", safe="")
-print("unikey=", "$UNIKEY")
-print("qrimg=", img)
-webbrowser.open(img)
-PY
+docker compose exec app npm run bootstrap-login
+echo "Use setup script Telegram delivery, or inspect pending_qr_url in SQLite only on trusted server."
 ```
 
-Then scan the QR code immediately and poll the status using the same `UNIKEY`:
+Then scan the QR code immediately and poll the status:
 
 ```bash
-docker compose exec app npm run bootstrap-login -- --check "$UNIKEY"
+docker compose exec app npm run bootstrap-login -- --check
 ```
 
 Status meanings:

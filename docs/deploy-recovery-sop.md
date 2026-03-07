@@ -8,7 +8,7 @@
 ## 2. 自动 vs 手动
 - 系统自动做：
   - 每次 `run-once` 前先做 cookie 刷新校验。
-  - 刷新失败时自动生成新的 `unikey/qrurl` 并通过 webhook 发通知。
+  - 刷新失败时自动生成新的待登录状态并通过 webhook 发通知。
   - 成功后自动发「今日歌单 + 推荐理由」通知。
   - 结构化运行日志写入 `data/run.log`，默认仅保留最近 24 小时。
 - 你手动做：
@@ -33,7 +33,7 @@
 2. 启动服务：`docker compose up -d --build`
 3. 网易云登录绑定：
    - `docker compose exec app npm run bootstrap-login`
-   - 扫码后执行：`docker compose exec app npm run bootstrap-login -- --check <unikey>`
+   - 扫码后执行：`docker compose exec app npm run bootstrap-login -- --check`
    - 返回 `qr-status=AUTHORIZED cookie-stored=true` 即成功。
 4. 一次性导入基线：
    - `docker compose exec app npm run douban-sync`
@@ -57,8 +57,8 @@
 ### 6.1 认证过期
 - 现象：收到登录失效通知或命令报 `AUTH_EXPIRED`。
 - 处理：
-  1. 使用通知中的 `qrurl` 扫码，或重新执行 `docker compose exec app npm run bootstrap-login`
-  2. 扫码后执行 `docker compose exec app npm run bootstrap-login -- --check <unikey>`
+  1. 按通知提示重新执行 `docker compose exec app npm run bootstrap-login` 获取并扫码
+  2. 扫码后执行 `docker compose exec app npm run bootstrap-login -- --check`
   3. 成功后重跑 `docker compose exec app npm run run-once`
 
 ### 6.2 当天入歌单少于 20 首
