@@ -443,6 +443,11 @@ async function trySelectByAi(
   try {
     const details = await fetchNeteaseSongDetails(api, candidateSongIds, cookie);
     const byId = new Map(details.map((item) => [item.songId, item]));
+    const longTermSongIdSet = new Set(
+      longTermWorks
+        .map((item) => item.preferredSongId ?? null)
+        .filter((songId): songId is string => Boolean(songId))
+    );
 
     const candidates = candidateSongIds.map((songId) => {
       const detail = byId.get(songId);
@@ -450,12 +455,20 @@ async function trySelectByAi(
         songId,
         title: detail?.title ?? "Unknown Title",
         artist: detail?.artist ?? "Unknown Artist",
-        source: "mixed" as const
+        source: longTermSongIdSet.has(songId) ? ("longterm" as const) : ("mixed" as const)
       };
     });
 
     const recentHints = candidates.slice(0, 30).map((item) => `${item.title} - ${item.artist}`);
     const longTermHints = longTermWorks.slice(0, 40).map((item) => `${item.title} - ${item.artist}`);
+    const preferenceTags = Array.from(
+      new Set(
+        longTermWorks
+          .flatMap((item) => item.tags)
+          .map((tag) => tag.trim())
+          .filter((tag) => tag.length > 0 && !tag.startsWith("douban:") && !tag.startsWith("netease:"))
+      )
+    );
 
     const selected = await selectSongIdsWithAi({
       provider,
@@ -466,6 +479,8 @@ async function trySelectByAi(
       candidates,
       recentHints,
       longTermHints
+      ,
+      preferenceTags
     });
     return sanitizeSongIds(selected, candidateSongIds, 20);
   } catch {

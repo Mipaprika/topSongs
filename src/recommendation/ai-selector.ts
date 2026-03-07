@@ -14,6 +14,7 @@ export interface AiSelectorInput {
   candidates: AiSongCandidate[];
   recentHints: string[];
   longTermHints: string[];
+  preferenceTags?: string[];
   fetchFn?: typeof fetch;
 }
 
@@ -160,18 +161,28 @@ function buildPrompt(input: AiSelectorInput): string {
   const candidatesJson = JSON.stringify(input.candidates, null, 2);
   const recentHints = input.recentHints.slice(0, 20).join(", ") || "none";
   const longTermHints = input.longTermHints.slice(0, 40).join(", ") || "none";
+  const preferenceTags = (input.preferenceTags ?? []).slice(0, 30).join(", ") || "none";
 
   return [
     "You are a music recommender.",
-    "Goal: choose songs user is likely to like now.",
-    "Policy: mostly similarity-driven, plus a smaller exploration portion.",
-    "Exploration target: around 20%-30% of final picks.",
+    "Goal: choose songs the user is likely to want to listen to now.",
+    "Selection policy:",
+    "- Favor strong similarity to the user's recent and long-term taste.",
+    "- Keep exploration limited to roughly 20%-30% of the final list.",
+    "- Prefer variety across artists, eras, and obvious duplicates when possible.",
+    "- Avoid picking only the most obvious old favorites unless they still fit the current taste context.",
+    "- Prefer songs that feel adjacent to the user's taste, not random genre jumps.",
     `Return exactly ${input.limit} unique songIds from the candidate list.`,
     "Do not output explanations.",
     'Output JSON only: {"songIds":["id1","id2",...]}',
     "",
     `Recent hints: ${recentHints}`,
     `Long-term hints: ${longTermHints}`,
+    `Preference tags: ${preferenceTags}`,
+    "Candidate source meanings:",
+    "- recent: close to recent activity",
+    "- longterm: from long-term preference baseline",
+    "- mixed: fits both or merged ranking",
     "",
     "Candidates:",
     candidatesJson
