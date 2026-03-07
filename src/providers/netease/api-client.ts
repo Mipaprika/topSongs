@@ -267,7 +267,7 @@ export class NeteaseApiClient {
       query: {
         op,
         pid: playlistId,
-        tracks: JSON.stringify(tracks),
+        tracks: tracks.join(","),
         timestamp: Date.now()
       },
       cookie

@@ -9,6 +9,7 @@ import { CredentialStore } from "./security/credential-store";
 import { importDoubanBaseline } from "./ingest/douban-import";
 import type { DoubanSongRow } from "./ingest/douban-parser";
 import type { NeteaseSongDetail } from "./providers/netease/types";
+import { isAiRecommenderEnabled, sanitizeSongIds, selectSongIdsWithAi } from "./recommendation/ai-selector";
 import {
   fetchDoubanBaselineFromPublicPages,
   resolveDoubanUserId,
@@ -221,12 +222,29 @@ async function executeLiveRecommendation(
   const longTermWorks = loadLongTermWorks(env.DB_PATH);
   const longTermSongIds = await resolveLongTermWorkSongIds(longTermWorks);
 
-  return runLiveDryRun({
+  const aiEnabled = isAiRecommenderEnabled(env);
+  const recommendationLimit = aiEnabled ? Number(env.AI_CANDIDATE_POOL_LIMIT ?? "120") : 20;
+  const baseResult = await runLiveDryRun({
     incrementalProvider: adapters.incrementalProvider,
     cursor,
-    limit: 20,
+    limit: Math.max(20, recommendationLimit),
     longTermSongIds
   });
+
+  if (!aiEnabled || baseResult.songIds.length === 0) {
+    return {
+      ...baseResult,
+      songIds: baseResult.songIds.slice(0, 20),
+      selectedCount: Math.min(baseResult.songIds.length, 20)
+    };
+  }
+
+  const selectedByAi = await trySelectByAi(env, api, baseResult.songIds, longTermWorks);
+  return {
+    ...baseResult,
+    songIds: selectedByAi,
+    selectedCount: selectedByAi.length
+  };
 }
 
 async function runOnceAndPublish(
@@ -432,6 +450,55 @@ async function fetchNeteaseSongDetails(api: NeteaseCliApi, songIds: string[], co
   }
 
   return details;
+}
+
+async function trySelectByAi(
+  env: NodeJS.ProcessEnv,
+  api: NeteaseCliApi,
+  candidateSongIds: string[],
+  longTermWorks: DoubanBaselineWorkRecord[]
+): Promise<string[]> {
+  const apiKey = (env.OPENAI_API_KEY ?? "").trim();
+  if (!apiKey) {
+    return candidateSongIds.slice(0, 20);
+  }
+
+  const cookie = loadPersistedCookie(env) ?? env.NETEASE_COOKIE;
+  if (!cookie) {
+    return candidateSongIds.slice(0, 20);
+  }
+
+  const model = (env.OPENAI_MODEL ?? "gpt-4.1-mini").trim();
+
+  try {
+    const details = await fetchNeteaseSongDetails(api, candidateSongIds, cookie);
+    const byId = new Map(details.map((item) => [item.songId, item]));
+
+    const candidates = candidateSongIds.map((songId) => {
+      const detail = byId.get(songId);
+      return {
+        songId,
+        title: detail?.title ?? "Unknown Title",
+        artist: detail?.artist ?? "Unknown Artist",
+        source: "mixed" as const
+      };
+    });
+
+    const recentHints = candidates.slice(0, 30).map((item) => `${item.title} - ${item.artist}`);
+    const longTermHints = longTermWorks.slice(0, 40).map((item) => `${item.title} - ${item.artist}`);
+
+    const selected = await selectSongIdsWithAi({
+      apiKey,
+      model,
+      limit: 20,
+      candidates,
+      recentHints,
+      longTermHints
+    });
+    return sanitizeSongIds(selected, candidateSongIds, 20);
+  } catch {
+    return candidateSongIds.slice(0, 20);
+  }
 }
 
 function mergeWorkRows(...args: [...rows: DoubanBaselineWorkRecord[][], limit: number]): DoubanBaselineWorkRecord[] {

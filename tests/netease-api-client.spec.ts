@@ -170,4 +170,23 @@ describe("NeteaseApiClient", () => {
       { songId: "12", title: "Fix You", artist: "Coldplay" }
     ]);
   });
+
+  it("sends playlist track updates as csv ids", async () => {
+    const fetchFn: typeof fetch = async (input) => {
+      const url = String(input);
+      expect(url).toContain("/playlist/tracks");
+      expect(url).toContain("tracks=11%2C12");
+
+      return jsonResponse({
+        code: 200
+      });
+    };
+
+    const client = new NeteaseApiClient({
+      baseUrl: "https://ncm.example.com",
+      fetchFn
+    });
+
+    await expect(client.updatePlaylistTracks("p1", "add", ["11", "12"], "MUSIC_U=live")).resolves.toBeUndefined();
+  });
 });

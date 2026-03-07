@@ -5,6 +5,9 @@
 - `MASTER_KEY`: encryption key for credential store
 - `NETEASE_PLAYLIST_ID`: fixed playlist id for daily replacement
 - `NETEASE_EVENT_CURSOR`: last cursor for incremental events (default `0`)
+- `OPENAI_API_KEY`: enable AI-based final selection
+- `OPENAI_MODEL`: optional model id (default `gpt-4.1-mini`)
+- `AI_CANDIDATE_POOL_LIMIT`: optional candidate pool size before AI selection (default `120`)
 
 When using Docker Compose:
 
@@ -112,6 +115,7 @@ If the response contains `account: null` and `profile: null`, the cookie is not 
 - Real runs merge `douban_baseline_songs`, `netease_baseline_songs`, and recent incremental events
 - Daily runs only fetch incremental events; the two baselines stay fixed unless you explicitly rebuild them
 - `run-once` clears the current tracks in `NETEASE_PLAYLIST_ID` and writes the latest 20 recommendations back into the same playlist
+- If `OPENAI_API_KEY` is present, the model selects final 20 from a larger candidate pool; failures fall back to deterministic ranking
 
 ## Auth Expiry
 
