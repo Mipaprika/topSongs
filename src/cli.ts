@@ -9,7 +9,15 @@ import { CredentialStore } from "./security/credential-store";
 import { importDoubanBaseline } from "./ingest/douban-import";
 import type { DoubanSongRow } from "./ingest/douban-parser";
 import type { NeteaseSongDetail } from "./providers/netease/types";
-import { isAiRecommenderEnabled, sanitizeSongIds, selectSongIdsWithAi } from "./recommendation/ai-selector";
+import {
+  isAiRecommenderEnabled,
+  resolveAiApiKey,
+  resolveAiBaseUrl,
+  resolveAiModel,
+  resolveAiProvider,
+  sanitizeSongIds,
+  selectSongIdsWithAi
+} from "./recommendation/ai-selector";
 import {
   fetchDoubanBaselineFromPublicPages,
   resolveDoubanUserId,
@@ -458,7 +466,7 @@ async function trySelectByAi(
   candidateSongIds: string[],
   longTermWorks: DoubanBaselineWorkRecord[]
 ): Promise<string[]> {
-  const apiKey = (env.OPENAI_API_KEY ?? "").trim();
+  const apiKey = resolveAiApiKey(env);
   if (!apiKey) {
     return candidateSongIds.slice(0, 20);
   }
@@ -468,7 +476,9 @@ async function trySelectByAi(
     return candidateSongIds.slice(0, 20);
   }
 
-  const model = (env.OPENAI_MODEL ?? "gpt-4.1-mini").trim();
+  const provider = resolveAiProvider(env);
+  const model = resolveAiModel(env);
+  const baseUrl = resolveAiBaseUrl(env);
 
   try {
     const details = await fetchNeteaseSongDetails(api, candidateSongIds, cookie);
@@ -488,8 +498,10 @@ async function trySelectByAi(
     const longTermHints = longTermWorks.slice(0, 40).map((item) => `${item.title} - ${item.artist}`);
 
     const selected = await selectSongIdsWithAi({
+      provider,
       apiKey,
       model,
+      baseUrl,
       limit: 20,
       candidates,
       recentHints,

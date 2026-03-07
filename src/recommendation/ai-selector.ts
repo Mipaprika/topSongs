@@ -6,8 +6,10 @@ export interface AiSongCandidate {
 }
 
 export interface AiSelectorInput {
+  provider: "openai" | "openai-compatible" | "aliyun-bailian";
   apiKey: string;
   model: string;
+  baseUrl?: string;
   limit: number;
   candidates: AiSongCandidate[];
   recentHints: string[];
@@ -32,8 +34,9 @@ export async function selectSongIdsWithAi(input: AiSelectorInput): Promise<strin
 
   const fetchFn = input.fetchFn ?? fetch;
   const prompt = buildPrompt(input);
+  const baseUrl = resolveBaseUrl(input);
 
-  const response = await fetchFn("https://api.openai.com/v1/responses", {
+  const response = await fetchFn(baseUrl, {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -122,7 +125,31 @@ export function isAiRecommenderEnabled(env: NodeJS.ProcessEnv): boolean {
   if (value === "false" || value === "0" || value === "off") {
     return false;
   }
-  return Boolean((env.OPENAI_API_KEY ?? "").trim());
+  return Boolean(resolveAiApiKey(env));
+}
+
+export function resolveAiProvider(env: NodeJS.ProcessEnv): "openai" | "openai-compatible" | "aliyun-bailian" {
+  const value = (env.LLM_PROVIDER ?? "").trim().toLowerCase();
+  if (value === "aliyun-bailian") {
+    return "aliyun-bailian";
+  }
+  if (value === "openai-compatible") {
+    return "openai-compatible";
+  }
+  return "openai";
+}
+
+export function resolveAiApiKey(env: NodeJS.ProcessEnv): string {
+  return (env.LLM_API_KEY ?? env.OPENAI_API_KEY ?? "").trim();
+}
+
+export function resolveAiModel(env: NodeJS.ProcessEnv): string {
+  return (env.LLM_MODEL ?? env.OPENAI_MODEL ?? defaultModelForProvider(resolveAiProvider(env))).trim();
+}
+
+export function resolveAiBaseUrl(env: NodeJS.ProcessEnv): string | undefined {
+  const value = (env.LLM_BASE_URL ?? "").trim();
+  return value.length > 0 ? value : undefined;
 }
 
 function buildPrompt(input: AiSelectorInput): string {
@@ -164,3 +191,21 @@ function extractResponseText(body: ResponsesApiOutput): string {
   return fragments.join("\n");
 }
 
+function resolveBaseUrl(input: AiSelectorInput): string {
+  if (input.baseUrl?.trim()) {
+    return `${input.baseUrl.replace(/\/+$/, "")}/responses`;
+  }
+
+  if (input.provider === "aliyun-bailian") {
+    return "https://dashscope.aliyuncs.com/compatible-mode/v1/responses";
+  }
+
+  return "https://api.openai.com/v1/responses";
+}
+
+function defaultModelForProvider(provider: AiSelectorInput["provider"]): string {
+  if (provider === "aliyun-bailian") {
+    return "qwen-plus-latest";
+  }
+  return "gpt-4.1-mini";
+}

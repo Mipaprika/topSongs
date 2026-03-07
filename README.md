@@ -11,8 +11,10 @@ npm install
 Required `.env` fields for Netease integration:
 
 - `NETEASE_PLAYLIST_ID`: target fixed playlist id
-- `OPENAI_API_KEY`: enable AI-based final selection on top of candidate pool
-- `OPENAI_MODEL`: optional, default `gpt-4.1-mini`
+- `LLM_PROVIDER`: optional, `openai` | `openai-compatible` | `aliyun-bailian`
+- `LLM_API_KEY`: enable AI-based final selection on top of candidate pool
+- `LLM_MODEL`: optional, defaults to `gpt-4.1-mini` for OpenAI and `qwen-plus-latest` for Bailian
+- `LLM_BASE_URL`: optional, required for `openai-compatible`, optional for Bailian
 - `AI_CANDIDATE_POOL_LIMIT`: optional, default `120`
 - `MASTER_KEY`: credential encryption key
 
@@ -85,7 +87,16 @@ docker compose build app
 3. Run `netease-sync` once for Netease liked-song baseline import.
 4. Schedule `run-once` daily on a server. This command replaces the contents of `NETEASE_PLAYLIST_ID` with the latest 20 picks.
 
-When `OPENAI_API_KEY` is set, `run-once` first builds a candidate pool and then lets the model choose the final 20 songs. If the model call fails, it falls back to rule-based ranking.
+When `LLM_API_KEY` is set, `run-once` first builds a candidate pool and then lets the model choose the final 20 songs. If the model call fails, it falls back to rule-based ranking.
+
+For Alibaba Bailian on mainland China servers:
+
+```env
+LLM_PROVIDER=aliyun-bailian
+LLM_API_KEY=your-bailian-key
+LLM_MODEL=qwen-plus-latest
+LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+```
 
 ## Verification (2026-03-06)
 
