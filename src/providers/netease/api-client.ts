@@ -310,6 +310,7 @@ export class NeteaseApiClient {
 
     const response = await this.fetchFn(url.toString(), {
       method: options.method ?? "GET",
+      signal: AbortSignal.timeout(15000),
       headers: options.cookie
         ? {
             cookie: options.cookie

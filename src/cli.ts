@@ -499,26 +499,31 @@ async function resolveGeneratedWorksToSongIds(
   works: AiRecommendedWork[],
   excludedWorks: Array<{ title: string; artist: string }>
 ): Promise<string[]> {
+  const maxAttempts = 24;
+  const concurrency = 6;
   const excluded = new Set(excludedWorks.map((item) => normalizeWorkKey(item.title, item.artist)));
+  const filteredWorks = works
+    .filter((work) => !excluded.has(normalizeWorkKey(work.title, work.artist)))
+    .slice(0, maxAttempts);
+
+  const withIndex = filteredWorks.map((work, index) => ({ work, index }));
+  const searchResults = await mapWithConcurrency(withIndex, concurrency, async ({ work, index }) => {
+    try {
+      const matches = await api.searchSongIds(`${work.title} ${work.artist}`, 5);
+      return { index, songId: matches[0] ?? null };
+    } catch {
+      return { index, songId: null };
+    }
+  });
+
   const seenSongIds = new Set<string>();
   const resolved: string[] = [];
-
-  for (const work of works) {
-    const workKey = normalizeWorkKey(work.title, work.artist);
-    if (excluded.has(workKey)) {
+  for (const item of searchResults.sort((a, b) => a.index - b.index)) {
+    if (!item.songId || seenSongIds.has(item.songId)) {
       continue;
     }
-
-    const matches = await api.searchSongIds(`${work.title} ${work.artist}`, 5);
-    for (const songId of matches) {
-      if (seenSongIds.has(songId)) {
-        continue;
-      }
-      seenSongIds.add(songId);
-      resolved.push(songId);
-      break;
-    }
-
+    seenSongIds.add(item.songId);
+    resolved.push(item.songId);
     if (resolved.length >= 20) {
       break;
     }
@@ -529,6 +534,27 @@ async function resolveGeneratedWorksToSongIds(
 
 function normalizeWorkKey(title: string, artist: string): string {
   return `${title}\n${artist}`.trim().toLowerCase();
+}
+
+async function mapWithConcurrency<TInput, TOutput>(
+  items: TInput[],
+  concurrency: number,
+  mapper: (item: TInput) => Promise<TOutput>
+): Promise<TOutput[]> {
+  if (items.length === 0) {
+    return [];
+  }
+
+  const workers = Array.from({ length: Math.max(1, concurrency) }, async (_, workerIndex) => {
+    const outputs: TOutput[] = [];
+    for (let index = workerIndex; index < items.length; index += Math.max(1, concurrency)) {
+      outputs.push(await mapper(items[index]));
+    }
+    return outputs;
+  });
+
+  const chunks = await Promise.all(workers);
+  return chunks.flat();
 }
 
 function mergeWorkRows(...args: [...rows: DoubanBaselineWorkRecord[][], limit: number]): DoubanBaselineWorkRecord[] {

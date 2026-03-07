@@ -48,6 +48,7 @@ export async function generateWorksWithAi(input: AiSelectorInput): Promise<AiRec
 
   const response = await fetchFn(endpoint, {
     method: "POST",
+    signal: AbortSignal.timeout(20000),
     headers: {
       "content-type": "application/json",
       authorization: `Bearer ${input.apiKey}`
