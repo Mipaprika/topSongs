@@ -10,13 +10,13 @@ import { importDoubanBaseline } from "./ingest/douban-import";
 import type { DoubanSongRow } from "./ingest/douban-parser";
 import type { NeteaseSongDetail } from "./providers/netease/types";
 import {
+  generateWorksWithAi,
   isAiRecommenderEnabled,
   resolveAiApiKey,
   resolveAiBaseUrl,
   resolveAiModel,
   resolveAiProvider,
-  sanitizeSongIds,
-  selectSongIdsWithAi
+  type AiRecommendedWork
 } from "./recommendation/ai-selector";
 import {
   fetchDoubanBaselineFromPublicPages,
@@ -228,11 +228,10 @@ async function executeLiveRecommendation(
     .filter((songId): songId is string => Boolean(songId));
 
   const aiEnabled = isAiRecommenderEnabled(env);
-  const recommendationLimit = aiEnabled ? Number(env.AI_CANDIDATE_POOL_LIMIT ?? "120") : 20;
   const baseResult = await runLiveDryRun({
     incrementalProvider: adapters.incrementalProvider,
     cursor,
-    limit: Math.max(20, recommendationLimit),
+    limit: aiEnabled ? 100 : 20,
     longTermSongIds
   });
 
@@ -244,7 +243,10 @@ async function executeLiveRecommendation(
     };
   }
 
-  const selectedByAi = await trySelectByAi(env, api, baseResult.songIds, longTermWorks);
+  const selectedByAi = await tryGenerateByAi(env, api, {
+    candidateSongIds: baseResult.songIds,
+    longTermWorks
+  });
   return {
     ...baseResult,
     songIds: selectedByAi,
@@ -420,20 +422,22 @@ async function fetchNeteaseSongDetails(api: NeteaseCliApi, songIds: string[], co
   return details;
 }
 
-async function trySelectByAi(
+async function tryGenerateByAi(
   env: NodeJS.ProcessEnv,
   api: NeteaseCliApi,
-  candidateSongIds: string[],
-  longTermWorks: DoubanBaselineWorkRecord[]
+  input: {
+    candidateSongIds: string[];
+    longTermWorks: DoubanBaselineWorkRecord[];
+  }
 ): Promise<string[]> {
   const apiKey = resolveAiApiKey(env);
   if (!apiKey) {
-    return candidateSongIds.slice(0, 20);
+    return input.candidateSongIds.slice(0, 20);
   }
 
   const cookie = loadPersistedCookie(env) ?? env.NETEASE_COOKIE;
   if (!cookie) {
-    return candidateSongIds.slice(0, 20);
+    return input.candidateSongIds.slice(0, 20);
   }
 
   const provider = resolveAiProvider(env);
@@ -441,51 +445,90 @@ async function trySelectByAi(
   const baseUrl = resolveAiBaseUrl(env);
 
   try {
-    const details = await fetchNeteaseSongDetails(api, candidateSongIds, cookie);
-    const byId = new Map(details.map((item) => [item.songId, item]));
-    const longTermSongIdSet = new Set(
-      longTermWorks
-        .map((item) => item.preferredSongId ?? null)
-        .filter((songId): songId is string => Boolean(songId))
+    const exclusionSongIds = Array.from(
+      new Set(
+        [
+          ...input.candidateSongIds,
+          ...input.longTermWorks
+            .map((item) => item.preferredSongId ?? null)
+            .filter((songId): songId is string => Boolean(songId))
+        ]
+      )
     );
-
-    const candidates = candidateSongIds.map((songId) => {
-      const detail = byId.get(songId);
-      return {
-        songId,
-        title: detail?.title ?? "Unknown Title",
-        artist: detail?.artist ?? "Unknown Artist",
-        source: longTermSongIdSet.has(songId) ? ("longterm" as const) : ("mixed" as const)
-      };
-    });
-
-    const recentHints = candidates.slice(0, 30).map((item) => `${item.title} - ${item.artist}`);
-    const longTermHints = longTermWorks.slice(0, 40).map((item) => `${item.title} - ${item.artist}`);
+    const exclusionDetails = await fetchNeteaseSongDetails(api, exclusionSongIds, cookie);
+    const excludedWorks = [
+      ...exclusionDetails.map((item) => ({ title: item.title, artist: item.artist })),
+      ...input.longTermWorks.map((item) => ({ title: item.title, artist: item.artist }))
+    ];
+    const recentHints = exclusionDetails.slice(0, 30).map((item) => `${item.title} - ${item.artist}`);
+    const longTermHints = input.longTermWorks.slice(0, 60).map((item) => `${item.title} - ${item.artist}`);
     const preferenceTags = Array.from(
       new Set(
-        longTermWorks
+        input.longTermWorks
           .flatMap((item) => item.tags)
           .map((tag) => tag.trim())
           .filter((tag) => tag.length > 0 && !tag.startsWith("douban:") && !tag.startsWith("netease:"))
       )
     );
 
-    const selected = await selectSongIdsWithAi({
+    const generatedWorks = await generateWorksWithAi({
       provider,
       apiKey,
       model,
       baseUrl,
-      limit: 20,
-      candidates,
+      limit: 40,
       recentHints,
-      longTermHints
-      ,
-      preferenceTags
+      longTermHints,
+      preferenceTags,
+      excludedWorks
     });
-    return sanitizeSongIds(selected, candidateSongIds, 20);
+
+    const resolvedSongIds = await resolveGeneratedWorksToSongIds(api, generatedWorks, excludedWorks);
+    if (resolvedSongIds.length > 0) {
+      return resolvedSongIds.slice(0, 20);
+    }
+
+    return input.candidateSongIds.slice(0, 20);
   } catch {
-    return candidateSongIds.slice(0, 20);
+    return input.candidateSongIds.slice(0, 20);
   }
+}
+
+async function resolveGeneratedWorksToSongIds(
+  api: NeteaseCliApi,
+  works: AiRecommendedWork[],
+  excludedWorks: Array<{ title: string; artist: string }>
+): Promise<string[]> {
+  const excluded = new Set(excludedWorks.map((item) => normalizeWorkKey(item.title, item.artist)));
+  const seenSongIds = new Set<string>();
+  const resolved: string[] = [];
+
+  for (const work of works) {
+    const workKey = normalizeWorkKey(work.title, work.artist);
+    if (excluded.has(workKey)) {
+      continue;
+    }
+
+    const matches = await api.searchSongIds(`${work.title} ${work.artist}`, 5);
+    for (const songId of matches) {
+      if (seenSongIds.has(songId)) {
+        continue;
+      }
+      seenSongIds.add(songId);
+      resolved.push(songId);
+      break;
+    }
+
+    if (resolved.length >= 20) {
+      break;
+    }
+  }
+
+  return resolved;
+}
+
+function normalizeWorkKey(title: string, artist: string): string {
+  return `${title}\n${artist}`.trim().toLowerCase();
 }
 
 function mergeWorkRows(...args: [...rows: DoubanBaselineWorkRecord[][], limit: number]): DoubanBaselineWorkRecord[] {

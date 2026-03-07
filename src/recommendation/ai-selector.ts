@@ -1,8 +1,8 @@
-export interface AiSongCandidate {
-  songId: string;
+export interface AiRecommendedWork {
   title: string;
   artist: string;
-  source: "recent" | "longterm" | "mixed";
+  reason?: string;
+  exploration?: boolean;
 }
 
 export interface AiSelectorInput {
@@ -11,10 +11,10 @@ export interface AiSelectorInput {
   model: string;
   baseUrl?: string;
   limit: number;
-  candidates: AiSongCandidate[];
   recentHints: string[];
   longTermHints: string[];
   preferenceTags?: string[];
+  excludedWorks: Array<{ title: string; artist: string }>;
   fetchFn?: typeof fetch;
 }
 
@@ -36,8 +36,8 @@ interface ChatCompletionsOutput {
   }>;
 }
 
-export async function selectSongIdsWithAi(input: AiSelectorInput): Promise<string[]> {
-  if (input.candidates.length === 0 || input.limit <= 0) {
+export async function generateWorksWithAi(input: AiSelectorInput): Promise<AiRecommendedWork[]> {
+  if (input.limit <= 0) {
     return [];
   }
 
@@ -60,69 +60,70 @@ export async function selectSongIdsWithAi(input: AiSelectorInput): Promise<strin
   }
 
   const text = await extractModelText(response, input.provider);
-  const parsed = parseSongIdsFromText(text);
-  return sanitizeSongIds(parsed, input.candidates.map((item) => item.songId), input.limit);
+  const parsed = parseWorksFromText(text);
+  return sanitizeWorks(parsed, input.excludedWorks, input.limit);
 }
 
-export function parseSongIdsFromText(text: string): string[] {
+export function parseWorksFromText(text: string): AiRecommendedWork[] {
   const raw = text.trim();
   if (!raw) return [];
 
-  try {
-    const parsed = JSON.parse(raw) as { songIds?: unknown };
-    if (Array.isArray(parsed.songIds)) {
-      return parsed.songIds
-        .map((item) => (typeof item === "string" || typeof item === "number" ? String(item) : null))
-        .filter((item): item is string => item !== null);
-    }
-  } catch {
-    // ignore and try object extraction
-  }
-
-  const match = raw.match(/\{[\s\S]*\}/);
-  if (!match) return [];
-
-  try {
-    const parsed = JSON.parse(match[0]) as { songIds?: unknown };
-    if (!Array.isArray(parsed.songIds)) {
-      return [];
-    }
-    return parsed.songIds
-      .map((item) => (typeof item === "string" || typeof item === "number" ? String(item) : null))
-      .filter((item): item is string => item !== null);
-  } catch {
+  const parsed = tryParseObject(raw) ?? tryParseObject(raw.match(/\{[\s\S]*\}/)?.[0] ?? "");
+  if (!parsed || !Array.isArray(parsed.recommendations)) {
     return [];
   }
-}
 
-export function sanitizeSongIds(songIds: string[], validIds: string[], limit: number): string[] {
-  const validSet = new Set(validIds);
-  const deduped: string[] = [];
-  const seen = new Set<string>();
-
-  for (const id of songIds) {
-    if (!validSet.has(id) || seen.has(id)) {
+  const works: AiRecommendedWork[] = [];
+  for (const item of parsed.recommendations) {
+    if (typeof item !== "object" || item === null) {
       continue;
     }
-    seen.add(id);
-    deduped.push(id);
-    if (deduped.length >= limit) {
-      return deduped;
+    const title = typeof (item as { title?: unknown }).title === "string" ? (item as { title: string }).title.trim() : "";
+    const artist = typeof (item as { artist?: unknown }).artist === "string" ? (item as { artist: string }).artist.trim() : "";
+    const reason =
+      typeof (item as { reason?: unknown }).reason === "string" ? (item as { reason: string }).reason.trim() : undefined;
+    const exploration =
+      typeof (item as { exploration?: unknown }).exploration === "boolean"
+        ? (item as { exploration: boolean }).exploration
+        : undefined;
+
+    if (!title || !artist) {
+      continue;
     }
+
+    works.push({
+      title,
+      artist,
+      reason,
+      exploration
+    });
   }
 
-  for (const id of validIds) {
-    if (seen.has(id)) {
+  return works;
+}
+
+export function sanitizeWorks(
+  works: AiRecommendedWork[],
+  excludedWorks: Array<{ title: string; artist: string }>,
+  limit: number
+): AiRecommendedWork[] {
+  const excluded = new Set(excludedWorks.map((item) => normalizeWorkKey(item.title, item.artist)));
+  const result: AiRecommendedWork[] = [];
+  const seen = new Set<string>();
+
+  for (const work of works) {
+    const key = normalizeWorkKey(work.title, work.artist);
+    if (excluded.has(key) || seen.has(key)) {
       continue;
     }
-    seen.add(id);
-    deduped.push(id);
-    if (deduped.length >= limit) {
+    seen.add(key);
+    result.push(work);
+    if (result.length >= limit) {
       break;
     }
   }
 
-  return deduped;
+  return result;
 }
 
 export function isAiRecommenderEnabled(env: NodeJS.ProcessEnv): boolean {
@@ -158,34 +159,32 @@ export function resolveAiBaseUrl(env: NodeJS.ProcessEnv): string | undefined {
 }
 
 function buildPrompt(input: AiSelectorInput): string {
-  const candidatesJson = JSON.stringify(input.candidates, null, 2);
-  const recentHints = input.recentHints.slice(0, 20).join(", ") || "none";
-  const longTermHints = input.longTermHints.slice(0, 40).join(", ") || "none";
-  const preferenceTags = (input.preferenceTags ?? []).slice(0, 30).join(", ") || "none";
+  const recentHints = input.recentHints.slice(0, 30).join(", ") || "none";
+  const longTermHints = input.longTermHints.slice(0, 60).join(", ") || "none";
+  const preferenceTags = (input.preferenceTags ?? []).slice(0, 40).join(", ") || "none";
+  const excludedWorks = input.excludedWorks
+    .slice(0, 120)
+    .map((item) => `${item.title} - ${item.artist}`)
+    .join(", ") || "none";
 
   return [
     "You are a music recommender.",
-    "Goal: choose songs the user is likely to want to listen to now.",
+    "Goal: recommend songs the user is likely to love now, not songs they already know well.",
+    "Return exactly the requested number of recommendations.",
     "Selection policy:",
-    "- Favor strong similarity to the user's recent and long-term taste.",
-    "- Keep exploration limited to roughly 20%-30% of the final list.",
-    "- Prefer variety across artists, eras, and obvious duplicates when possible.",
-    "- Avoid picking only the most obvious old favorites unless they still fit the current taste context.",
-    "- Prefer songs that feel adjacent to the user's taste, not random genre jumps.",
-    `Return exactly ${input.limit} unique songIds from the candidate list.`,
-    "Do not output explanations.",
-    'Output JSON only: {"songIds":["id1","id2",...]}',
+    "- Mostly similarity-driven, with about 20%-30% exploration.",
+    "- Exploration should still stay near the user's taste.",
+    "- Prefer songs adjacent to the user's long-term and recent taste.",
+    "- Avoid obvious repeats of songs the user already liked or recently interacted with.",
+    "- Avoid duplicate songs, alternate versions, or trivial re-picks when possible.",
+    "Important: recommendations must avoid the excluded works list.",
+    'Output JSON only: {"recommendations":[{"title":"...","artist":"...","reason":"...","exploration":false}]}',
     "",
-    `Recent hints: ${recentHints}`,
-    `Long-term hints: ${longTermHints}`,
+    `Need ${input.limit} recommendations.`,
+    `Recent taste hints: ${recentHints}`,
+    `Long-term taste hints: ${longTermHints}`,
     `Preference tags: ${preferenceTags}`,
-    "Candidate source meanings:",
-    "- recent: close to recent activity",
-    "- longterm: from long-term preference baseline",
-    "- mixed: fits both or merged ranking",
-    "",
-    "Candidates:",
-    candidatesJson
+    `Excluded works: ${excludedWorks}`
   ].join("\n");
 }
 
@@ -235,13 +234,13 @@ function buildRequestBody(input: AiSelectorInput, prompt: string): Record<string
     return {
       model: input.model,
       input: prompt,
-      temperature: 0.6
+      temperature: 0.8
     };
   }
 
   return {
     model: input.model,
-    temperature: 0.6,
+    temperature: 0.8,
     messages: [
       {
         role: "user",
@@ -259,4 +258,20 @@ async function extractModelText(response: Response, provider: AiSelectorInput["p
 
   const body = (await response.json()) as ChatCompletionsOutput;
   return body.choices?.[0]?.message?.content?.trim() ?? "";
+}
+
+function tryParseObject(text: string): { recommendations?: unknown } | null {
+  if (!text) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(text) as { recommendations?: unknown };
+  } catch {
+    return null;
+  }
+}
+
+function normalizeWorkKey(title: string, artist: string): string {
+  return `${title}\n${artist}`.trim().toLowerCase();
 }

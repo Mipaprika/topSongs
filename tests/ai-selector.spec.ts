@@ -1,30 +1,41 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  generateWorksWithAi,
   isAiRecommenderEnabled,
-  parseSongIdsFromText,
+  parseWorksFromText,
   resolveAiApiKey,
   resolveAiBaseUrl,
   resolveAiModel,
   resolveAiProvider,
-  sanitizeSongIds,
-  selectSongIdsWithAi
+  sanitizeWorks
 } from "../src/recommendation/ai-selector";
 
 describe("ai-selector", () => {
-  it("parses clean json song ids", () => {
-    const ids = parseSongIdsFromText('{"songIds":["1","2","3"]}');
-    expect(ids).toEqual(["1", "2", "3"]);
+  it("parses clean json works", () => {
+    const works = parseWorksFromText('{"recommendations":[{"title":"Song A","artist":"Artist A"},{"title":"Song B","artist":"Artist B"}]}');
+    expect(works).toEqual([
+      { title: "Song A", artist: "Artist A", reason: undefined, exploration: undefined },
+      { title: "Song B", artist: "Artist B", reason: undefined, exploration: undefined }
+    ]);
   });
 
   it("parses json embedded in text", () => {
-    const ids = parseSongIdsFromText('result:\n{"songIds":[1,2,3]}\nthanks');
-    expect(ids).toEqual(["1", "2", "3"]);
+    const works = parseWorksFromText('result:\n{"recommendations":[{"title":"Song A","artist":"Artist A"}]}\nthanks');
+    expect(works).toEqual([{ title: "Song A", artist: "Artist A", reason: undefined, exploration: undefined }]);
   });
 
-  it("sanitizes against candidate pool and fills fallback", () => {
-    const ids = sanitizeSongIds(["x", "2", "2"], ["1", "2", "3"], 3);
-    expect(ids).toEqual(["2", "1", "3"]);
+  it("sanitizes against excluded works and dedupes", () => {
+    const works = sanitizeWorks(
+      [
+        { title: "Song A", artist: "Artist A" },
+        { title: "Song A", artist: "Artist A" },
+        { title: "Song B", artist: "Artist B" }
+      ],
+      [{ title: "Song A", artist: "Artist A" }],
+      5
+    );
+    expect(works).toEqual([{ title: "Song B", artist: "Artist B" }]);
   });
 
   it("detects ai enabled by api key unless explicitly disabled", () => {
@@ -44,11 +55,11 @@ describe("ai-selector", () => {
     expect(resolveAiBaseUrl(env)).toBeUndefined();
   });
 
-  it("selects ids from responses api output_text", async () => {
+  it("generates works from responses api output_text", async () => {
     const fetchFn: typeof fetch = async () =>
       new Response(
         JSON.stringify({
-          output_text: '{"songIds":["2","1"]}'
+          output_text: '{"recommendations":[{"title":"Song A","artist":"Artist A"},{"title":"Song B","artist":"Artist B"}]}'
         }),
         {
           status: 200,
@@ -56,21 +67,21 @@ describe("ai-selector", () => {
         }
       );
 
-    const ids = await selectSongIdsWithAi({
+    const works = await generateWorksWithAi({
       provider: "openai",
       apiKey: "k",
       model: "gpt-4.1-mini",
       limit: 2,
-      candidates: [
-        { songId: "1", title: "a", artist: "b", source: "mixed" },
-        { songId: "2", title: "c", artist: "d", source: "mixed" }
-      ],
       recentHints: [],
       longTermHints: [],
+      excludedWorks: [],
       fetchFn
     });
 
-    expect(ids).toEqual(["2", "1"]);
+    expect(works).toEqual([
+      { title: "Song A", artist: "Artist A", reason: undefined, exploration: undefined },
+      { title: "Song B", artist: "Artist B", reason: undefined, exploration: undefined }
+    ]);
   });
 
   it("uses compatible base url when provided", async () => {
@@ -82,7 +93,7 @@ describe("ai-selector", () => {
           choices: [
             {
               message: {
-                content: '{"songIds":["2","1"]}'
+                content: '{"recommendations":[{"title":"Song A","artist":"Artist A"}]}'
               }
             }
           ]
@@ -94,21 +105,19 @@ describe("ai-selector", () => {
       );
     };
 
-    await selectSongIdsWithAi({
+    await generateWorksWithAi({
       provider: "aliyun-bailian",
       apiKey: "k",
       model: "qwen-plus-latest",
       baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-      limit: 2,
-      candidates: [
-        { songId: "1", title: "a", artist: "b", source: "mixed" },
-        { songId: "2", title: "c", artist: "d", source: "mixed" }
-      ],
+      limit: 1,
       recentHints: [],
       longTermHints: [],
+      excludedWorks: [],
       fetchFn
     });
 
     expect(calledUrl).toBe("https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions");
   });
 });
+
