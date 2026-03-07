@@ -6,6 +6,10 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="$ROOT_DIR/.env"
 CRON_MARKER="# topsongs-daily-job"
 
+generate_master_key() {
+  LC_ALL=C od -An -N32 -tx1 /dev/urandom | tr -d ' \n'
+}
+
 need_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
     echo "缺少命令: $1"
@@ -41,11 +45,23 @@ prompt_secret() {
   local value
   read -r -s -p "$label: " value
   echo
+  value="${value//$'\n'/}"
+  value="${value//$'\r'/}"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  if [[ "${value:0:1}" == "\"" && "${value: -1}" == "\"" && "${#value}" -ge 2 ]]; then
+    value="${value:1:${#value}-2}"
+  fi
+  if [[ "${value:0:1}" == "'" && "${value: -1}" == "'" && "${#value}" -ge 2 ]]; then
+    value="${value:1:${#value}-2}"
+  fi
   echo "$value"
 }
 
 format_env_value() {
   local value="$1"
+  value="${value//$'\r'/}"
+  value="${value//$'\n'/}"
   value="${value//\\/\\\\}"
   value="${value//\"/\\\"}"
   printf '"%s"' "$value"
@@ -59,23 +75,37 @@ upsert_env() {
 
   touch "$ENV_FILE"
   chmod 600 "$ENV_FILE"
-  local tmp
-  tmp="$(mktemp)"
-  awk -v k="$key" -v v="$value" '
-    BEGIN { done = 0 }
-    $0 ~ ("^" k "=") {
-      print k "=" v
-      done = 1
-      next
-    }
-    { print }
-    END {
-      if (!done) {
-        print k "=" v
-      }
-    }
-  ' "$ENV_FILE" > "$tmp"
-  mv "$tmp" "$ENV_FILE"
+  local tmp_file
+  tmp_file="$(mktemp)"
+  local replaced=0
+  local skip_broken=0
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$skip_broken" -eq 1 ]]; then
+      if [[ -z "$line" || "$line" =~ ^[[:space:]]*# || "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
+        skip_broken=0
+      else
+        continue
+      fi
+    fi
+
+    if [[ "$line" == "$key="* ]]; then
+      if [[ "$replaced" -eq 0 ]]; then
+        printf '%s=%s\n' "$key" "$value" >> "$tmp_file"
+        replaced=1
+      fi
+      skip_broken=1
+      continue
+    fi
+
+    printf '%s\n' "$line" >> "$tmp_file"
+  done < "$ENV_FILE"
+
+  if [[ "$replaced" -eq 0 ]]; then
+    printf '%s=%s\n' "$key" "$value" >> "$tmp_file"
+  fi
+
+  mv "$tmp_file" "$ENV_FILE"
   chmod 600 "$ENV_FILE"
 }
 
@@ -112,24 +142,26 @@ bootstrap_qr() {
   cd "$ROOT_DIR" && docker compose exec -T app npm run bootstrap-login >/dev/null
 
   local parsed
-  parsed="$(python3 - <<PY
-import sqlite3
-from pathlib import Path
-db = Path("$ROOT_DIR/data/top-songs.db")
-if not db.exists():
-    print("|")
-    raise SystemExit(0)
-conn = sqlite3.connect(str(db))
-try:
-    row = conn.execute("SELECT pending_unikey, pending_qr_url FROM netease_auth_state WHERE provider='netease' LIMIT 1").fetchone()
-finally:
-    conn.close()
-if not row or not row[0] or not row[1]:
-    print("|")
-else:
-    print(f"{row[0]}|{row[1]}")
-PY
-)"
+  parsed="$(cd "$ROOT_DIR" && docker compose exec -T app node --input-type=module -e '
+import { DatabaseSync } from "node:sqlite";
+import { existsSync } from "node:fs";
+
+const dbPath = "data/top-songs.db";
+if (!existsSync(dbPath)) {
+  console.log("|");
+  process.exit(0);
+}
+const db = new DatabaseSync(dbPath, { readonly: true });
+const row = db
+  .prepare("SELECT pending_unikey, pending_qr_url FROM netease_auth_state WHERE provider = ? LIMIT 1")
+  .get("netease");
+db.close();
+if (!row?.pending_unikey || !row?.pending_qr_url) {
+  console.log("|");
+} else {
+  console.log(`${row.pending_unikey}|${row.pending_qr_url}`);
+}
+')"
 
   local unikey
   local qrurl
@@ -152,9 +184,9 @@ PY
 main() {
   need_cmd docker
   need_cmd crontab
-  need_cmd awk
   need_cmd sed
-  need_cmd python3
+  need_cmd od
+  need_cmd tr
   need_cmd curl
 
   cd "$ROOT_DIR"
@@ -229,11 +261,7 @@ main() {
   local master_key
   master_key="$(get_env_value "MASTER_KEY")"
   if [[ -z "$master_key" ]]; then
-    master_key="$(python3 - <<'PY'
-import secrets
-print(secrets.token_hex(32))
-PY
-)"
+    master_key="$(generate_master_key)"
   fi
 
   upsert_env "MASTER_KEY" "$master_key"
