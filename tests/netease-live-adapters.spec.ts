@@ -50,6 +50,9 @@ describe("createNeteaseLiveAdapters", () => {
         },
         async updatePlaylistTracks() {
           return;
+        },
+        async updatePlaylistDescription() {
+          return;
         }
       }
     });

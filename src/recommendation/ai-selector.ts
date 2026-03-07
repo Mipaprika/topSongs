@@ -12,9 +12,12 @@ export interface AiSelectorInput {
   baseUrl?: string;
   limit: number;
   recentHints: string[];
-  longTermHints: string[];
+  longTermSongHints: string[];
+  longTermAlbumHints: string[];
   preferenceTags?: string[];
   excludedWorks: Array<{ title: string; artist: string }>;
+  timeoutMs?: number;
+  retryCount?: number;
   fetchFn?: typeof fetch;
 }
 
@@ -45,44 +48,75 @@ export async function generateWorksWithAi(input: AiSelectorInput): Promise<AiRec
   const prompt = buildPrompt(input);
   const endpoint = resolveEndpoint(input);
   const requestBody = buildRequestBody(input, prompt);
+  const timeoutMs = Math.max(5_000, input.timeoutMs ?? 45_000);
+  const retryCount = Math.max(0, input.retryCount ?? 2);
+  let lastError: Error | null = null;
 
-  const response = await fetchFn(endpoint, {
-    method: "POST",
-    signal: AbortSignal.timeout(20000),
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${input.apiKey}`
-    },
-    body: JSON.stringify(requestBody)
-  });
+  for (let attempt = 0; attempt <= retryCount; attempt += 1) {
+    try {
+      const response = await fetchFn(endpoint, {
+        method: "POST",
+        signal: AbortSignal.timeout(timeoutMs),
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${input.apiKey}`
+        },
+        body: JSON.stringify(requestBody)
+      });
 
-  if (!response.ok) {
-    throw new Error(`AI selector failed: ${response.status} ${response.statusText}`);
+      if (!response.ok) {
+        if (response.status >= 500 && attempt < retryCount) {
+          await sleep(300 * (attempt + 1));
+          continue;
+        }
+        throw new Error(`AI selector failed: ${response.status} ${response.statusText}`);
+      }
+
+      const text = await extractModelText(response, input.provider);
+      const parsed = parseWorksFromText(text);
+      return sanitizeWorks(parsed, input.excludedWorks, input.limit);
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      const timedOut = lastError.name === "TimeoutError" || /aborted|timeout/i.test(lastError.message);
+      if (attempt < retryCount && timedOut) {
+        await sleep(300 * (attempt + 1));
+        continue;
+      }
+      throw lastError;
+    }
   }
 
-  const text = await extractModelText(response, input.provider);
-  const parsed = parseWorksFromText(text);
-  return sanitizeWorks(parsed, input.excludedWorks, input.limit);
+  throw lastError ?? new Error("AI selector failed");
 }
 
 export function parseWorksFromText(text: string): AiRecommendedWork[] {
   const raw = text.trim();
   if (!raw) return [];
 
-  const parsed = tryParseObject(raw) ?? tryParseObject(raw.match(/\{[\s\S]*\}/)?.[0] ?? "");
-  if (!parsed || !Array.isArray(parsed.recommendations)) {
+  const parsed =
+    tryParseJson(raw) ??
+    tryParseJson(raw.match(/\{[\s\S]*\}/)?.[0] ?? "") ??
+    tryParseJson(raw.match(/\[[\s\S]*\]/)?.[0] ?? "");
+  if (!parsed) {
     return [];
   }
+  const recommendations = Array.isArray(parsed)
+    ? parsed
+    : Array.isArray((parsed as { recommendations?: unknown }).recommendations)
+      ? (parsed as { recommendations: unknown[] }).recommendations
+      : [];
+  if (recommendations.length === 0) return [];
 
   const works: AiRecommendedWork[] = [];
-  for (const item of parsed.recommendations) {
+  for (const item of recommendations) {
     if (typeof item !== "object" || item === null) {
       continue;
     }
     const title = typeof (item as { title?: unknown }).title === "string" ? (item as { title: string }).title.trim() : "";
     const artist = typeof (item as { artist?: unknown }).artist === "string" ? (item as { artist: string }).artist.trim() : "";
-    const reason =
+    const reasonRaw =
       typeof (item as { reason?: unknown }).reason === "string" ? (item as { reason: string }).reason.trim() : undefined;
+    const reason = normalizeReason(reasonRaw);
     const exploration =
       typeof (item as { exploration?: unknown }).exploration === "boolean"
         ? (item as { exploration: boolean }).exploration
@@ -161,7 +195,8 @@ export function resolveAiBaseUrl(env: NodeJS.ProcessEnv): string | undefined {
 
 function buildPrompt(input: AiSelectorInput): string {
   const recentHints = input.recentHints.slice(0, 30).join(", ") || "none";
-  const longTermHints = input.longTermHints.slice(0, 60).join(", ") || "none";
+  const longTermSongHints = input.longTermSongHints.slice(0, 80).join(", ") || "none";
+  const longTermAlbumHints = input.longTermAlbumHints.slice(0, 80).join(", ") || "none";
   const preferenceTags = (input.preferenceTags ?? []).slice(0, 40).join(", ") || "none";
   const excludedWorks = input.excludedWorks
     .slice(0, 120)
@@ -178,12 +213,14 @@ function buildPrompt(input: AiSelectorInput): string {
     "- Prefer songs adjacent to the user's long-term and recent taste.",
     "- Avoid obvious repeats of songs the user already liked or recently interacted with.",
     "- Avoid duplicate songs, alternate versions, or trivial re-picks when possible.",
+    "- `reason` must be Simplified Chinese, concise and specific, no more than 30 Chinese characters, and avoid repetitive templates.",
     "Important: recommendations must avoid the excluded works list.",
     'Output JSON only: {"recommendations":[{"title":"...","artist":"...","reason":"...","exploration":false}]}',
     "",
     `Need ${input.limit} recommendations.`,
     `Recent taste hints: ${recentHints}`,
-    `Long-term taste hints: ${longTermHints}`,
+    `Long-term song taste hints (Netease): ${longTermSongHints}`,
+    `Long-term album taste hints (Douban): ${longTermAlbumHints}`,
     `Preference tags: ${preferenceTags}`,
     `Excluded works: ${excludedWorks}`
   ].join("\n");
@@ -261,13 +298,12 @@ async function extractModelText(response: Response, provider: AiSelectorInput["p
   return body.choices?.[0]?.message?.content?.trim() ?? "";
 }
 
-function tryParseObject(text: string): { recommendations?: unknown } | null {
+function tryParseJson(text: string): unknown | null {
   if (!text) {
     return null;
   }
-
   try {
-    return JSON.parse(text) as { recommendations?: unknown };
+    return JSON.parse(text) as unknown;
   } catch {
     return null;
   }
@@ -275,4 +311,57 @@ function tryParseObject(text: string): { recommendations?: unknown } | null {
 
 function normalizeWorkKey(title: string, artist: string): string {
   return `${title}\n${artist}`.trim().toLowerCase();
+}
+
+function normalizeReason(reason: string | undefined): string | undefined {
+  if (!reason) {
+    return undefined;
+  }
+  const compact = reason.replace(/\s+/g, " ").trim();
+  if (countReasonUnits(compact) <= 40) {
+    return compact;
+  }
+
+  return trimReasonToUnits(compact, 40);
+}
+
+function countReasonUnits(input: string): number {
+  let count = 0;
+  const tokens = input.match(/[\u4e00-\u9fff]|[A-Za-z]+(?:'[A-Za-z]+)?/g) ?? [];
+  for (const token of tokens) {
+    if (/^[\u4e00-\u9fff]$/.test(token)) {
+      count += 1;
+      continue;
+    }
+    if (/^[A-Za-z]+(?:'[A-Za-z]+)?$/.test(token)) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
+function trimReasonToUnits(input: string, maxUnits: number): string {
+  const tokens = input.match(/[\u4e00-\u9fff]|[A-Za-z]+(?:'[A-Za-z]+)?|[^A-Za-z\u4e00-\u9fff]+/g) ?? [];
+  let used = 0;
+  let output = "";
+  for (const token of tokens) {
+    if (/^[\u4e00-\u9fff]$/.test(token)) {
+      if (used + 1 > maxUnits) break;
+      output += token;
+      used += 1;
+      continue;
+    }
+    if (/^[A-Za-z]+(?:'[A-Za-z]+)?$/.test(token)) {
+      if (used + 1 > maxUnits) break;
+      output += token;
+      used += 1;
+      continue;
+    }
+    output += token;
+  }
+  return output.trim();
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

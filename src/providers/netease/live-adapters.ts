@@ -21,6 +21,7 @@ export interface NeteaseApiLike {
     tracks: string[],
     cookie: string
   ): Promise<void>;
+  updatePlaylistDescription(playlistId: string, description: string, cookie: string): Promise<void>;
 }
 
 export interface CreateNeteaseLiveAdaptersInput {
@@ -55,7 +56,9 @@ export function createNeteaseLiveAdapters(input: CreateNeteaseLiveAdaptersInput)
   const playlistProvider = new NeteasePlaylistProvider({
     getPlaylistTrackIds: (playlistId: string) => api.getPlaylistTrackIds(playlistId, input.session.getCookie()),
     updatePlaylistTracks: (playlistId: string, op: "add" | "del", tracks: string[]) =>
-      api.updatePlaylistTracks(playlistId, op, tracks, input.session.getCookie())
+      api.updatePlaylistTracks(playlistId, op, tracks, input.session.getCookie()),
+    updatePlaylistDescription: (playlistId: string, description: string) =>
+      api.updatePlaylistDescription(playlistId, description, input.session.getCookie())
   });
 
   return {

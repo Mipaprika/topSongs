@@ -99,7 +99,7 @@ Status meanings:
 - `WAITING_SCAN`: QR code has not been scanned yet
 - `WAITING_CONFIRM`: QR code was scanned, waiting for phone confirmation
 - `EXPIRED`: discard the old `UNIKEY` and generate a new QR code
-- `AUTHORIZED`: the app already stored the normalized `cookie=...` in the database; no manual `.env` update is required
+- `AUTHORIZED`: the app already stored cookie in SQLite (`cookie-stored=true`); no manual `.env` update is required
 
 If `run-once -- --dry-run` returns `HttpError: 301 Moved Permanently`, verify the actual login state inside the container:
 

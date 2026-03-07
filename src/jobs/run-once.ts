@@ -36,6 +36,8 @@ export interface RunOnceLiveDryRunInput {
   limit: number;
   longTermSongIds: string[];
   explorationSongIds?: string[];
+  maxPages?: number;
+  maxEvents?: number;
 }
 
 export interface RunOnceLiveDryRunResult {
@@ -44,17 +46,55 @@ export interface RunOnceLiveDryRunResult {
   events: number;
   nextCursor: string;
   songIds: string[];
+  recentLikedSongIds: string[];
 }
 
 export async function runOnceLiveDryRun(
   input: Partial<RunOnceLiveDryRunInput> & Pick<RunOnceLiveDryRunInput, "incrementalProvider">
 ): Promise<RunOnceLiveDryRunResult> {
-  const cursor = input.cursor ?? "0";
+  const initialCursor = input.cursor ?? "0";
   const limit = input.limit ?? 20;
-  const response = await input.incrementalProvider.fetchSince(cursor);
+  const maxPages = Math.max(1, input.maxPages ?? 5);
+  const maxEvents = Math.max(1, input.maxEvents ?? 500);
+  const eventPageSize = 100;
+  const aggregatedEvents: Array<{ eventId: string; songId: string; actionType: string; actionTime: number }> = [];
+  let nextCursor = initialCursor;
+  let pageCount = 0;
+
+  while (pageCount < maxPages && aggregatedEvents.length < maxEvents) {
+    const cursorBeforeFetch = nextCursor;
+    const page = await input.incrementalProvider.fetchSince(cursorBeforeFetch);
+    pageCount += 1;
+
+    if (page.events.length === 0) {
+      nextCursor = page.nextCursor;
+      break;
+    }
+
+    aggregatedEvents.push(...page.events);
+    nextCursor = page.nextCursor;
+
+    if (page.events.length < eventPageSize) {
+      break;
+    }
+
+    if (page.nextCursor === cursorBeforeFetch) {
+      break;
+    }
+  }
+
+  const events = aggregatedEvents.slice(0, maxEvents);
 
   const recentSongIds = Array.from(
-    new Set(response.events.map((event) => event.songId))
+    new Set(events.map((event) => event.songId))
+  );
+  const recentLikedSongIds = Array.from(
+    new Set(
+      events
+        .filter((event) => event.actionType === "LIKE")
+        .sort((a, b) => b.actionTime - a.actionTime)
+        .map((event) => event.songId)
+    )
   );
   const longTermSongIds = input.longTermSongIds ?? [];
 
@@ -87,8 +127,9 @@ export async function runOnceLiveDryRun(
   return {
     selectedCount: filled.length,
     candidates: candidates.length,
-    events: response.events.length,
-    nextCursor: response.nextCursor,
-    songIds: filled
+    events: events.length,
+    nextCursor,
+    songIds: filled,
+    recentLikedSongIds
   };
 }

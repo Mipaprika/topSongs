@@ -4,6 +4,9 @@ dist
 
 .env
 .env.example
+.env.bak.*
 data/*.db
 data/douban-baseline.json
+data/run.log
+data/cron-run.log
 .playwright-cli/

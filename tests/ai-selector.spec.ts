@@ -73,7 +73,9 @@ describe("ai-selector", () => {
       model: "gpt-4.1-mini",
       limit: 2,
       recentHints: [],
-      longTermHints: [],
+      longTermSongHints: [],
+      longTermAlbumHints: [],
+      preferenceTags: [],
       excludedWorks: [],
       fetchFn
     });
@@ -112,7 +114,9 @@ describe("ai-selector", () => {
       baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
       limit: 1,
       recentHints: [],
-      longTermHints: [],
+      longTermSongHints: [],
+      longTermAlbumHints: [],
+      preferenceTags: [],
       excludedWorks: [],
       fetchFn
     });
@@ -120,4 +124,3 @@ describe("ai-selector", () => {
     expect(calledUrl).toBe("https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions");
   });
 });
-

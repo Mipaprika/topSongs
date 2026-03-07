@@ -17,11 +17,15 @@ describe("publishDailyPlaylist", () => {
       async addTracks(playlistId: string, songs: string[]) {
         expect(playlistId).toBe("playlist-id");
         state.added = songs;
+      },
+      async replaceDescription(playlistId: string, description: string) {
+        expect(playlistId).toBe("playlist-id");
+        expect(description).toBe("desc");
       }
     };
 
     const songs = Array.from({ length: 22 }, (_, i) => `s${i + 1}`);
-    await publishDailyPlaylist("playlist-id", songs, provider);
+    await publishDailyPlaylist("playlist-id", songs, provider, "desc");
 
     expect(state.removeAllCalled).toBe(true);
     expect(state.added.length).toBe(20);

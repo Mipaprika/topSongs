@@ -17,6 +17,10 @@ Required `.env` fields for Netease integration:
 - `LLM_BASE_URL`: optional, required for `openai-compatible`, optional for Bailian
 - `AI_CANDIDATE_POOL_LIMIT`: optional, default `120`
 - `MASTER_KEY`: credential encryption key
+- `NOTIFY_WEBHOOK_URL`: optional, webhook for auth-expired / job-failed / low-count alerts
+- `NOTIFY_WEBHOOK_FORMAT`: optional, `generic` | `feishu` | `dingtalk` | `wecom` (default `generic`)
+- `RUN_LOG_PATH`: optional, JSONL run log path (default: `<DB_PATH dirname>/run.log`)
+- `RUN_LOG_RETENTION_HOURS`: optional, log retention window, default `24`
 
 When running with Docker Compose, the app container overrides these values automatically:
 
@@ -54,6 +58,12 @@ docker compose exec app npm run run-once -- --dry-run
 docker compose exec app npm run run-once
 ```
 
+One-command server bootstrap (interactive `.env` + compose startup + daily cron):
+
+```bash
+bash scripts/setup-server.sh
+```
+
 Douban baseline import reads [data/douban-baseline.json](/Users/shangliang/Documents/Xi/Code/topSongs/data/douban-baseline.json) by default. The file should be a JSON array like:
 
 ```json
@@ -71,6 +81,7 @@ If the file does not exist, `douban-sync` can fetch from a public Douban profile
 `netease-sync` imports your Netease liked-song baseline once, then later daily runs only need incremental events.
 
 If QR login behaves unexpectedly, see the troubleshooting section in [operations.md](/Users/shangliang/Documents/Xi/Code/topSongs/docs/operations.md).
+Deployment/recovery standard procedure is documented in [deploy-recovery-sop.md](/Users/shangliang/Documents/Xi/Code/topSongs/docs/deploy-recovery-sop.md).
 
 Persistent SQLite data is stored on the host at [data](/Users/shangliang/Documents/Xi/Code/topSongs/data). The database file inside the container is `/app/data/top-songs.db`.
 

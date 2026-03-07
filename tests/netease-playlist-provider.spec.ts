@@ -14,6 +14,9 @@ describe("NeteasePlaylistProvider", () => {
       updatePlaylistTracks: async (playlistId, op, tracks) => {
         expect(playlistId).toBe("p1");
         calls.push({ op, tracks });
+      },
+      updatePlaylistDescription: async () => {
+        return;
       }
     });
 
@@ -22,7 +25,7 @@ describe("NeteasePlaylistProvider", () => {
 
     expect(calls).toEqual([
       { op: "del", tracks: ["s-old-1", "s-old-2"] },
-      { op: "add", tracks: ["s1", "s2", "s3"] }
+      { op: "add", tracks: ["s3", "s2", "s1"] }
     ]);
   });
 });

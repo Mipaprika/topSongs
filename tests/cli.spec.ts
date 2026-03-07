@@ -41,7 +41,8 @@ describe("runCli", () => {
         candidates: 3,
         events: 3,
         nextCursor: "1200",
-        songIds: ["s1", "s2", "s3"]
+        songIds: ["s1", "s2", "s3"],
+        recentLikedSongIds: ["s1", "s2", "s3"]
       })
     });
 
@@ -77,7 +78,7 @@ describe("runCli", () => {
       })
     });
 
-    expect(out).toBe("qr-status=AUTHORIZED cookie=MUSIC_U=next-cookie; __csrf=csrf-token");
+    expect(out).toBe("qr-status=AUTHORIZED cookie-stored=true");
   });
 
   it("persists authorized cookie in db and reuses it for live dry run", async () => {
@@ -127,7 +128,8 @@ describe("runCli", () => {
         candidates: 4,
         events: 1,
         nextCursor: "42",
-        songIds: ["a", "b"]
+        songIds: ["a", "b"],
+        recentLikedSongIds: ["a", "b"]
       })
     });
 
@@ -270,7 +272,8 @@ describe("runCli", () => {
           candidates: 1,
           events: 0,
           nextCursor: "0",
-          songIds: ["song-2"]
+          songIds: ["song-2"],
+          recentLikedSongIds: ["song-2"]
         };
       }
     });
@@ -317,7 +320,8 @@ describe("runCli", () => {
           candidates: 3,
           events: 0,
           nextCursor: "10",
-          songIds: ["s1", "s2", "s3"]
+          songIds: ["s1", "s2", "s3"],
+          recentLikedSongIds: ["s1", "s2", "s3"]
         };
       }
     });
@@ -325,7 +329,7 @@ describe("runCli", () => {
     expect(out).toContain("run-once published");
     expect(playlistOps).toEqual([
       { op: "del", tracks: ["old-1", "old-2"] },
-      { op: "add", tracks: ["s1", "s2", "s3"] }
+      { op: "add", tracks: ["s3", "s2", "s1"] }
     ]);
 
     const db = new DbClient(dbPath);
@@ -340,6 +344,11 @@ function createApiStub(overrides: Partial<{
   createQrLogin: () => Promise<{ unikey: string; qrurl: string }>;
   checkQrLogin: (unikey: string) => Promise<QrCheckResult>;
   searchSongIds: (keywords: string, limit?: number) => Promise<string[]>;
+  searchSongs: (
+    keywords: string,
+    limit?: number
+  ) => Promise<Array<{ songId: string; title: string; artist: string }>>;
+  getSongCommentCount: (songId: string) => Promise<number>;
   getLoginProfile: (cookie: string) => Promise<{ userId: string | null }>;
   getLikedSongIds: (userId: string, cookie: string) => Promise<string[]>;
   getSongsDetail: (songIds: string[], cookie?: string) => Promise<Array<{ songId: string; title: string; artist: string }>>;
@@ -347,6 +356,7 @@ function createApiStub(overrides: Partial<{
   fetchEvents: (cursor: string, cookie: string) => Promise<FetchEventsResult>;
   getPlaylistTrackIds: (playlistId: string, cookie: string) => Promise<string[]>;
   updatePlaylistTracks: (playlistId: string, op: "add" | "del", tracks: string[], cookie: string) => Promise<void>;
+  updatePlaylistDescription: (playlistId: string, description: string, cookie: string) => Promise<void>;
 }> = {}) {
   return {
     async createQrLogin() {
@@ -363,6 +373,12 @@ function createApiStub(overrides: Partial<{
     },
     async searchSongIds(keywords: string, limit = 5) {
       return (await overrides.searchSongIds?.(keywords, limit)) ?? [];
+    },
+    async searchSongs(keywords: string, limit = 5) {
+      return (await overrides.searchSongs?.(keywords, limit)) ?? [];
+    },
+    async getSongCommentCount(songId: string) {
+      return (await overrides.getSongCommentCount?.(songId)) ?? 0;
     },
     async getLoginProfile(cookie: string) {
       return (await overrides.getLoginProfile?.(cookie)) ?? { userId: null };
@@ -389,6 +405,9 @@ function createApiStub(overrides: Partial<{
     },
     async updatePlaylistTracks(playlistId: string, op: "add" | "del", tracks: string[], cookie: string) {
       await overrides.updatePlaylistTracks?.(playlistId, op, tracks, cookie);
+    },
+    async updatePlaylistDescription(playlistId: string, description: string, cookie: string) {
+      await overrides.updatePlaylistDescription?.(playlistId, description, cookie);
     }
   };
 }

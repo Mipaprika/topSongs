@@ -22,6 +22,14 @@ interface NeteaseResponseEnvelope<T> {
   [key: string]: unknown;
 }
 
+interface PlaylistDetailPayload {
+  playlist?: {
+    name?: string;
+    description?: string;
+    trackIds?: unknown[];
+  };
+}
+
 export class NeteaseApiClient {
   private readonly baseUrl: string;
   private readonly fetchFn: typeof fetch;
@@ -129,7 +137,9 @@ export class NeteaseApiClient {
   }
 
   async getPlaylistTrackIds(playlistId: string, cookie: string): Promise<string[]> {
-    const body = await this.requestJson<NeteaseResponseEnvelope<{ songs?: unknown[]; playlist?: { trackIds?: unknown[] } }>>(
+    const body = await this.requestJson<
+      NeteaseResponseEnvelope<{ songs?: unknown[]; playlist?: { trackIds?: unknown[] } }> & PlaylistDetailPayload
+    >(
       "/playlist/track/all",
       {
         query: {
@@ -170,42 +180,47 @@ export class NeteaseApiClient {
   }
 
   async searchSongIds(keywords: string, limit = 5): Promise<string[]> {
-    let sawMethodNotAllowed = false;
+    const songs = await this.searchSongs(keywords, limit);
+    return songs.map((song) => song.songId);
+  }
 
-    for (const path of ["/search", "/cloudsearch"]) {
-      try {
-        const body = await this.requestJson<NeteaseResponseEnvelope<{ songs?: unknown[] }>>(path, {
-          query: {
-            keywords,
-            type: 1,
-            limit,
-            offset: 0,
-            timestamp: Date.now()
-          }
-        });
-
-        const songs = body.result?.songs ?? body.data?.songs ?? (body as { songs?: unknown[] }).songs ?? [];
-        if (!Array.isArray(songs)) {
-          return [];
-        }
-
-        return songs.map(extractSongId).filter((songId): songId is string => songId !== null);
-      } catch (error) {
-        if (error instanceof HttpError && error.status === 405) {
-          sawMethodNotAllowed = true;
-          continue;
-        }
-        if (!(error instanceof HttpError) || path === "/cloudsearch") {
-          throw error;
-        }
+  async searchSongs(keywords: string, limit = 5): Promise<NeteaseSongDetail[]> {
+    const body = await this.requestJson<NeteaseResponseEnvelope<{ songs?: unknown[] }>>("/cloudsearch", {
+      query: {
+        keywords,
+        type: 1,
+        limit,
+        offset: 0,
+        timestamp: Date.now()
       }
-    }
+    });
 
-    if (sawMethodNotAllowed) {
+    const songs = body.result?.songs ?? body.data?.songs ?? (body as { songs?: unknown[] }).songs ?? [];
+    if (!Array.isArray(songs)) {
       return [];
     }
 
-    return [];
+    return songs
+      .map(toSongDetail)
+      .filter((song): song is NeteaseSongDetail => song !== null);
+  }
+
+  async getSongCommentCount(songId: string): Promise<number> {
+    const body = await this.requestJson<NeteaseResponseEnvelope<{ total?: number; totalCount?: number }>>("/comment/music", {
+      query: {
+        id: songId,
+        limit: 1,
+        offset: 0,
+        timestamp: Date.now()
+      }
+    });
+
+    const directTotal = (body as { total?: unknown }).total;
+    const directTotalCount = (body as { totalCount?: unknown }).totalCount;
+    const dataTotal = (body.data as { total?: unknown } | undefined)?.total;
+    const dataTotalCount = (body.data as { totalCount?: unknown } | undefined)?.totalCount;
+    const candidate = [directTotal, directTotalCount, dataTotal, dataTotalCount].find((value) => typeof value === "number");
+    return typeof candidate === "number" ? candidate : 0;
   }
 
   async getLoginProfile(cookie: string): Promise<{ userId: string | null }> {
@@ -292,6 +307,33 @@ export class NeteaseApiClient {
       },
       cookie
     });
+  }
+
+  async updatePlaylistDescription(playlistId: string, description: string, cookie: string): Promise<void> {
+    const detail = await this.requestJson<NeteaseResponseEnvelope<unknown> & PlaylistDetailPayload>("/playlist/detail", {
+      query: {
+        id: playlistId,
+        timestamp: Date.now()
+      },
+      cookie
+    });
+    const currentName = detail.playlist?.name ?? (detail.data as PlaylistDetailPayload | undefined)?.playlist?.name ?? "";
+    const normalizedName = currentName.trim().toLowerCase() === "undefined" ? "" : currentName.trim();
+
+    const body = await this.requestJson<NeteaseResponseEnvelope<unknown>>("/playlist/update", {
+      method: "POST",
+      query: {
+        id: playlistId,
+        name: normalizedName || "每日AI推荐",
+        desc: description,
+        timestamp: Date.now()
+      },
+      cookie
+    });
+
+    if (body.code !== 200) {
+      throw new HttpError(500, `playlist description update failed: code=${body.code}`);
+    }
   }
 
   private async requestJson<T>(path: string, options: RequestOptions = {}): Promise<T> {

@@ -63,6 +63,10 @@ export interface NeteaseAuthStateRecord {
   updatedAt: string;
 }
 
+interface RuntimeStateRow {
+  value: string;
+}
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const schemaPath = join(__dirname, "schema.sql");
 
@@ -249,6 +253,19 @@ export class DbClient {
     return row.total;
   }
 
+  listRecentLikedSongIds(limit: number): string[] {
+    const stmt = this.db.prepare(`
+      SELECT song_id AS songId, MAX(action_time) AS latestActionTime
+      FROM netease_events
+      WHERE action_type = 'LIKE'
+      GROUP BY song_id
+      ORDER BY latestActionTime DESC
+      LIMIT ?
+    `);
+    const rows = stmt.all(limit) as Array<{ songId: string }>;
+    return rows.map((row) => row.songId);
+  }
+
   upsertNeteaseAuthState(input: NeteaseAuthStateInput): void {
     const stmt = this.db.prepare(`
       INSERT INTO netease_auth_state (provider, encrypted_cookie, pending_unikey, pending_qr_url)
@@ -277,6 +294,28 @@ export class DbClient {
 
     const row = stmt.get() as NeteaseAuthStateRecord | undefined;
     return row ?? null;
+  }
+
+  getRuntimeState(key: string): string | null {
+    const stmt = this.db.prepare(`
+      SELECT value
+      FROM runtime_state
+      WHERE key = ?
+      LIMIT 1
+    `);
+    const row = stmt.get(key) as RuntimeStateRow | undefined;
+    return row?.value ?? null;
+  }
+
+  upsertRuntimeState(key: string, value: string): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO runtime_state (key, value)
+      VALUES (?, ?)
+      ON CONFLICT(key) DO UPDATE SET
+        value = excluded.value,
+        updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    `);
+    stmt.run(key, value);
   }
 
   private migrateLegacyDoubanBaselineSongs(): void {
