@@ -189,4 +189,36 @@ describe("NeteaseApiClient", () => {
 
     await expect(client.updatePlaylistTracks("p1", "add", ["11", "12"], "MUSIC_U=live")).resolves.toBeUndefined();
   });
+
+  it("falls back to cloudsearch when search returns 405", async () => {
+    const calls: string[] = [];
+    const fetchFn: typeof fetch = async (input) => {
+      const url = String(input);
+      calls.push(url);
+
+      if (url.includes("/search")) {
+        return new Response("method not allowed", { status: 405, statusText: "Method Not Allowed" });
+      }
+
+      if (url.includes("/cloudsearch")) {
+        return jsonResponse({
+          code: 200,
+          result: {
+            songs: [{ id: 11 }, { id: 12 }]
+          }
+        });
+      }
+
+      throw new Error(`unexpected url: ${url}`);
+    };
+
+    const client = new NeteaseApiClient({
+      baseUrl: "https://ncm.example.com",
+      fetchFn
+    });
+
+    await expect(client.searchSongIds("yellow coldplay", 2)).resolves.toEqual(["11", "12"]);
+    expect(calls.some((item) => item.includes("/search"))).toBe(true);
+    expect(calls.some((item) => item.includes("/cloudsearch"))).toBe(true);
+  });
 });

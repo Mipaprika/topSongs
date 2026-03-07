@@ -87,7 +87,7 @@ docker compose build app
 3. Run `netease-sync` once for Netease liked-song baseline import.
 4. Schedule `run-once` daily on a server. This command replaces the contents of `NETEASE_PLAYLIST_ID` with the latest 20 picks.
 
-When `LLM_API_KEY` is set, `run-once` first builds a candidate pool and then lets the model choose the final 20 songs. If the model call fails, it falls back to rule-based ranking.
+When `LLM_API_KEY` is set, `run-once` first builds a candidate pool from Netease long-term baseline plus recent incremental events, then lets the model choose the final 20 songs. Douban stays as long-term preference context for the model and is not mapped to Netease `songId` during daily runs. If the model call fails, it falls back to rule-based ranking.
 
 For Alibaba Bailian on mainland China servers:
 

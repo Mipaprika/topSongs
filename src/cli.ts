@@ -42,7 +42,6 @@ export interface CliDeps {
   env?: NodeJS.ProcessEnv;
   createNeteaseApiClient?: (baseUrl: string) => NeteaseCliApi;
   runOnceLiveDryRun?: typeof runOnceLiveDryRun;
-  resolveLongTermWorkSongIds?: (works: DoubanBaselineWorkRecord[]) => Promise<string[]>;
 }
 
 const HELP_TEXT = `
@@ -65,9 +64,6 @@ export async function runCli(args: string[], deps: CliDeps = {}): Promise<string
         baseUrl
       }));
   const runLiveDryRun = deps.runOnceLiveDryRun ?? runOnceLiveDryRun;
-  const resolveLongTermWorkSongIds =
-    deps.resolveLongTermWorkSongIds ??
-    (async (works: DoubanBaselineWorkRecord[]) => resolveLongTermWorkSongIdsFromApi(env, works));
 
   if (!command || command === "--help" || command === "-h") {
     return HELP_TEXT.trim();
@@ -100,14 +96,14 @@ export async function runCli(args: string[], deps: CliDeps = {}): Promise<string
       if (flags.includes("--dry-run")) {
         const liveContext = createLiveRunContext(env, createNeteaseApiClient);
         if (liveContext) {
-          const result = await executeLiveRecommendation(env, liveContext.api, runLiveDryRun, resolveLongTermWorkSongIds);
+          const result = await executeLiveRecommendation(env, liveContext.api, runLiveDryRun);
           return `run-once dry-run completed: selectedCount=${result.selectedCount} events=${result.events} candidates=${result.candidates} nextCursor=${result.nextCursor}\ntop20SongIds=${result.songIds.join(",")}`;
         }
 
         const result = runOnceDryRun();
         return `run-once dry-run completed: selectedCount=${result.selectedCount}`;
       }
-      return await runOnceAndPublish(env, createNeteaseApiClient, runLiveDryRun, resolveLongTermWorkSongIds);
+      return await runOnceAndPublish(env, createNeteaseApiClient, runLiveDryRun);
     default:
       return `Unknown command: ${command}\n\n${HELP_TEXT.trim()}`;
   }
@@ -212,8 +208,7 @@ function createLiveRunContext(
 async function executeLiveRecommendation(
   env: NodeJS.ProcessEnv,
   api: NeteaseCliApi,
-  runLiveDryRun: typeof runOnceLiveDryRun,
-  resolveLongTermWorkSongIds: (works: DoubanBaselineWorkRecord[]) => Promise<string[]>
+  runLiveDryRun: typeof runOnceLiveDryRun
 ) {
   const cookie = loadPersistedCookie(env) ?? env.NETEASE_COOKIE;
   if (!cookie) {
@@ -228,7 +223,9 @@ async function executeLiveRecommendation(
   });
   const cursor = env.NETEASE_EVENT_CURSOR ?? "0";
   const longTermWorks = loadLongTermWorks(env.DB_PATH);
-  const longTermSongIds = await resolveLongTermWorkSongIds(longTermWorks);
+  const longTermSongIds = longTermWorks
+    .map((work) => work.preferredSongId ?? null)
+    .filter((songId): songId is string => Boolean(songId));
 
   const aiEnabled = isAiRecommenderEnabled(env);
   const recommendationLimit = aiEnabled ? Number(env.AI_CANDIDATE_POOL_LIMIT ?? "120") : 20;
@@ -258,8 +255,7 @@ async function executeLiveRecommendation(
 async function runOnceAndPublish(
   env: NodeJS.ProcessEnv,
   createNeteaseApiClient: (baseUrl: string) => NeteaseCliApi,
-  runLiveDryRun: typeof runOnceLiveDryRun,
-  resolveLongTermWorkSongIds: (works: DoubanBaselineWorkRecord[]) => Promise<string[]>
+  runLiveDryRun: typeof runOnceLiveDryRun
 ): Promise<string> {
   const liveContext = createLiveRunContext(env, createNeteaseApiClient);
   if (!liveContext) {
@@ -271,7 +267,7 @@ async function runOnceAndPublish(
     throw new Error("NETEASE_PLAYLIST_ID is required for run-once");
   }
 
-  const result = await executeLiveRecommendation(env, liveContext.api, runLiveDryRun, resolveLongTermWorkSongIds);
+  const result = await executeLiveRecommendation(env, liveContext.api, runLiveDryRun);
   const adapters = createNeteaseLiveAdapters({
     session: {
       getCookie: () => liveContext.cookie
@@ -409,42 +405,6 @@ async function runNeteaseSync(
   const total = db.countNeteaseBaselineSongs();
   db.close();
   return `netease-sync imported=${details.length} total=${total} backfilled=${missingPreferredSongIdCount}`;
-}
-
-async function resolveLongTermWorkSongIdsFromApi(
-  env: NodeJS.ProcessEnv,
-  works: DoubanBaselineWorkRecord[]
-): Promise<string[]> {
-  const baseUrl = env.NETEASE_API_BASE_URL;
-  if (!baseUrl || works.length === 0) {
-    return [];
-  }
-
-  const api = new NeteaseApiClient({ baseUrl });
-  const resolved: string[] = [];
-  const seen = new Set<string>();
-
-  for (const work of works) {
-    if (work.preferredSongId) {
-      if (!seen.has(work.preferredSongId)) {
-        seen.add(work.preferredSongId);
-        resolved.push(work.preferredSongId);
-      }
-      continue;
-    }
-
-    const matches = await api.searchSongIds(`${work.title} ${work.artist}`, 3);
-    for (const songId of matches) {
-      if (seen.has(songId)) {
-        continue;
-      }
-      seen.add(songId);
-      resolved.push(songId);
-      break;
-    }
-  }
-
-  return resolved;
 }
 
 async function fetchNeteaseSongDetails(api: NeteaseCliApi, songIds: string[], cookie: string): Promise<NeteaseSongDetail[]> {

@@ -237,7 +237,7 @@ describe("runCli", () => {
     verifyDb.close();
   });
 
-  it("resolves long-term works into song candidates for live dry run", async () => {
+  it("uses only netease preferred song ids as long-term candidates", async () => {
     const dir = mkdtempSync(join(tmpdir(), "top-songs-longterm-cli-"));
     tempDirs.push(dir);
 
@@ -252,6 +252,7 @@ describe("runCli", () => {
     db.upsertNeteaseBaselineSong({
       title: "Yellow",
       artist: "Coldplay",
+      preferredSongId: "song-2",
       tags: ["netease:liked"]
     });
     db.close();
@@ -262,37 +263,20 @@ describe("runCli", () => {
         NETEASE_API_BASE_URL: "http://localhost:3000",
         NETEASE_COOKIE: "MUSIC_U=live"
       } as NodeJS.ProcessEnv,
-      resolveLongTermWorkSongIds: async (works) => {
-        expect(works).toEqual([
-          {
-            title: "Back To Bedlam",
-            artist: "James Blunt",
-            preferredSongId: null,
-            tags: ["douban:collect", "摇滚"]
-          },
-          {
-            title: "Yellow",
-            artist: "Coldplay",
-            preferredSongId: null,
-            tags: ["netease:liked"]
-          }
-        ]);
-        return ["song-1", "song-2"];
-      },
       runOnceLiveDryRun: async (input) => {
-        expect(input.longTermSongIds).toEqual(["song-1", "song-2"]);
+        expect(input.longTermSongIds).toEqual(["song-2"]);
         return {
-          selectedCount: 2,
-          candidates: 2,
+          selectedCount: 1,
+          candidates: 1,
           events: 0,
           nextCursor: "0",
-          songIds: ["song-1", "song-2"]
+          songIds: ["song-2"]
         };
       }
     });
 
-    expect(out).toContain("selectedCount=2");
-    expect(out).toContain("song-1,song-2");
+    expect(out).toContain("selectedCount=1");
+    expect(out).toContain("song-2");
   });
 
   it("publishes playlist on run-once and records the run", async () => {
@@ -326,7 +310,16 @@ describe("runCli", () => {
             playlistOps.push({ op, tracks });
           }
         }),
-      resolveLongTermWorkSongIds: async () => ["s1", "s2", "s3"]
+      runOnceLiveDryRun: async (input) => {
+        expect(input.longTermSongIds).toEqual([]);
+        return {
+          selectedCount: 3,
+          candidates: 3,
+          events: 0,
+          nextCursor: "10",
+          songIds: ["s1", "s2", "s3"]
+        };
+      }
     });
 
     expect(out).toContain("run-once published");

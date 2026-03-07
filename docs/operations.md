@@ -114,7 +114,8 @@ If the response contains `account: null` and `profile: null`, the cookie is not 
 - Execute daily job manually: `docker compose exec app npm run run-once`
 - Dry-run with real data: `docker compose exec app npm run run-once -- --dry-run`
 - Run with scheduler on server after compose is up
-- Real runs merge `douban_baseline_songs`, `netease_baseline_songs`, and recent incremental events
+- Real runs use `netease_baseline_songs` plus recent incremental events as the `songId` candidate pool
+- `douban_baseline_songs` stays as AI context only and is not mapped to Netease `songId` during daily runs
 - Daily runs only fetch incremental events; the two baselines stay fixed unless you explicitly rebuild them
 - `run-once` clears the current tracks in `NETEASE_PLAYLIST_ID` and writes the latest 20 recommendations back into the same playlist
 - If `LLM_API_KEY` is present, the model selects final 20 from a larger candidate pool; failures fall back to deterministic ranking

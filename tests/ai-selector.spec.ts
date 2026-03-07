@@ -77,10 +77,21 @@ describe("ai-selector", () => {
     let calledUrl = "";
     const fetchFn: typeof fetch = async (input) => {
       calledUrl = String(input);
-      return new Response(JSON.stringify({ output_text: '{"songIds":["2","1"]}' }), {
-        status: 200,
-        headers: { "content-type": "application/json" }
-      });
+      return new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: '{"songIds":["2","1"]}'
+              }
+            }
+          ]
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        }
+      );
     };
 
     await selectSongIdsWithAi({
@@ -98,6 +109,6 @@ describe("ai-selector", () => {
       fetchFn
     });
 
-    expect(calledUrl).toBe("https://dashscope.aliyuncs.com/compatible-mode/v1/responses");
+    expect(calledUrl).toBe("https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions");
   });
 });

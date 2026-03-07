@@ -27,6 +27,14 @@ interface ResponsesApiOutput {
   }>;
 }
 
+interface ChatCompletionsOutput {
+  choices?: Array<{
+    message?: {
+      content?: string;
+    };
+  }>;
+}
+
 export async function selectSongIdsWithAi(input: AiSelectorInput): Promise<string[]> {
   if (input.candidates.length === 0 || input.limit <= 0) {
     return [];
@@ -34,27 +42,23 @@ export async function selectSongIdsWithAi(input: AiSelectorInput): Promise<strin
 
   const fetchFn = input.fetchFn ?? fetch;
   const prompt = buildPrompt(input);
-  const baseUrl = resolveBaseUrl(input);
+  const endpoint = resolveEndpoint(input);
+  const requestBody = buildRequestBody(input, prompt);
 
-  const response = await fetchFn(baseUrl, {
+  const response = await fetchFn(endpoint, {
     method: "POST",
     headers: {
       "content-type": "application/json",
       authorization: `Bearer ${input.apiKey}`
     },
-    body: JSON.stringify({
-      model: input.model,
-      input: prompt,
-      temperature: 0.6
-    })
+    body: JSON.stringify(requestBody)
   });
 
   if (!response.ok) {
     throw new Error(`AI selector failed: ${response.status} ${response.statusText}`);
   }
 
-  const body = (await response.json()) as ResponsesApiOutput;
-  const text = extractResponseText(body);
+  const text = await extractModelText(response, input.provider);
   const parsed = parseSongIdsFromText(text);
   return sanitizeSongIds(parsed, input.candidates.map((item) => item.songId), input.limit);
 }
@@ -191,13 +195,18 @@ function extractResponseText(body: ResponsesApiOutput): string {
   return fragments.join("\n");
 }
 
-function resolveBaseUrl(input: AiSelectorInput): string {
-  if (input.baseUrl?.trim()) {
-    return `${input.baseUrl.replace(/\/+$/, "")}/responses`;
+function resolveEndpoint(input: AiSelectorInput): string {
+  const baseUrl = input.baseUrl?.trim();
+  if (baseUrl) {
+    return `${baseUrl.replace(/\/+$/, "")}/${input.provider === "openai" ? "responses" : "chat/completions"}`;
   }
 
   if (input.provider === "aliyun-bailian") {
-    return "https://dashscope.aliyuncs.com/compatible-mode/v1/responses";
+    return "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions";
+  }
+
+  if (input.provider === "openai-compatible") {
+    throw new Error("openai-compatible provider requires baseUrl");
   }
 
   return "https://api.openai.com/v1/responses";
@@ -208,4 +217,35 @@ function defaultModelForProvider(provider: AiSelectorInput["provider"]): string 
     return "qwen-plus-latest";
   }
   return "gpt-4.1-mini";
+}
+
+function buildRequestBody(input: AiSelectorInput, prompt: string): Record<string, unknown> {
+  if (input.provider === "openai") {
+    return {
+      model: input.model,
+      input: prompt,
+      temperature: 0.6
+    };
+  }
+
+  return {
+    model: input.model,
+    temperature: 0.6,
+    messages: [
+      {
+        role: "user",
+        content: prompt
+      }
+    ]
+  };
+}
+
+async function extractModelText(response: Response, provider: AiSelectorInput["provider"]): Promise<string> {
+  if (provider === "openai") {
+    const body = (await response.json()) as ResponsesApiOutput;
+    return extractResponseText(body);
+  }
+
+  const body = (await response.json()) as ChatCompletionsOutput;
+  return body.choices?.[0]?.message?.content?.trim() ?? "";
 }

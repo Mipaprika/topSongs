@@ -170,22 +170,42 @@ export class NeteaseApiClient {
   }
 
   async searchSongIds(keywords: string, limit = 5): Promise<string[]> {
-    const body = await this.requestJson<NeteaseResponseEnvelope<{ songs?: unknown[] }>>("/search", {
-      query: {
-        keywords,
-        type: 1,
-        limit,
-        offset: 0,
-        timestamp: Date.now()
-      }
-    });
+    let sawMethodNotAllowed = false;
 
-    const songs = body.result?.songs ?? body.data?.songs ?? (body as { songs?: unknown[] }).songs ?? [];
-    if (!Array.isArray(songs)) {
+    for (const path of ["/search", "/cloudsearch"]) {
+      try {
+        const body = await this.requestJson<NeteaseResponseEnvelope<{ songs?: unknown[] }>>(path, {
+          query: {
+            keywords,
+            type: 1,
+            limit,
+            offset: 0,
+            timestamp: Date.now()
+          }
+        });
+
+        const songs = body.result?.songs ?? body.data?.songs ?? (body as { songs?: unknown[] }).songs ?? [];
+        if (!Array.isArray(songs)) {
+          return [];
+        }
+
+        return songs.map(extractSongId).filter((songId): songId is string => songId !== null);
+      } catch (error) {
+        if (error instanceof HttpError && error.status === 405) {
+          sawMethodNotAllowed = true;
+          continue;
+        }
+        if (!(error instanceof HttpError) || path === "/cloudsearch") {
+          throw error;
+        }
+      }
+    }
+
+    if (sawMethodNotAllowed) {
       return [];
     }
 
-    return songs.map(extractSongId).filter((songId): songId is string => songId !== null);
+    return [];
   }
 
   async getLoginProfile(cookie: string): Promise<{ userId: string | null }> {
