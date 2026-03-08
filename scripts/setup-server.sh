@@ -17,6 +17,31 @@ need_cmd() {
   fi
 }
 
+compose() {
+  if docker compose version >/dev/null 2>&1; then
+    docker compose "$@"
+    return
+  fi
+  if command -v docker-compose >/dev/null 2>&1; then
+    docker-compose "$@"
+    return
+  fi
+  echo "缺少 Docker Compose（请安装 docker compose 插件或 docker-compose）。"
+  exit 1
+}
+
+compose_cli() {
+  if docker compose version >/dev/null 2>&1; then
+    echo "docker compose"
+    return
+  fi
+  if command -v docker-compose >/dev/null 2>&1; then
+    echo "docker-compose"
+    return
+  fi
+  echo ""
+}
+
 send_telegram_message() {
   local bot_token="$1"
   local chat_id="$2"
@@ -125,7 +150,13 @@ get_env_value() {
 install_cron() {
   local hour="$1"
   local minute="$2"
-  local cmd="cd $ROOT_DIR && docker compose exec -T app npm run run-once >> $ROOT_DIR/data/cron-run.log 2>&1 $CRON_MARKER"
+  local compose_cmd
+  compose_cmd="$(compose_cli)"
+  if [[ -z "$compose_cmd" ]]; then
+    echo "缺少 Docker Compose（请安装 docker compose 插件或 docker-compose）。"
+    exit 1
+  fi
+  local cmd="cd $ROOT_DIR && $compose_cmd exec -T app npm run run-once >> $ROOT_DIR/data/cron-run.log 2>&1 $CRON_MARKER"
   local current
   current="$(crontab -l 2>/dev/null | sed "/$CRON_MARKER/d" || true)"
   {
@@ -139,10 +170,10 @@ bootstrap_qr() {
   local chat_id="$2"
   echo
   echo "正在生成网易云登录二维码并发送到 Telegram..."
-  cd "$ROOT_DIR" && docker compose exec -T app npm run bootstrap-login >/dev/null
+  cd "$ROOT_DIR" && compose exec -T app npm run bootstrap-login >/dev/null
 
   local parsed
-  parsed="$(cd "$ROOT_DIR" && docker compose exec -T app node --input-type=module -e '
+  parsed="$(cd "$ROOT_DIR" && compose exec -T app node --input-type=module -e '
 import { DatabaseSync } from "node:sqlite";
 import { existsSync } from "node:fs";
 
@@ -283,15 +314,17 @@ main() {
   echo
   echo "已写入 .env（敏感值已覆盖更新）。"
   echo "正在启动服务..."
-  docker compose up -d --build
+  compose up --build --detach
 
   echo "安装每日 cron 任务..."
   install_cron "$cron_hour" "$cron_minute"
 
   echo
   echo "初始化完成。"
-  echo "- 服务状态：docker compose ps"
-  echo "- 手动跑一次：docker compose exec app npm run run-once"
+  local compose_cmd_text
+  compose_cmd_text="$(compose_cli)"
+  echo "- 服务状态：$compose_cmd_text ps"
+  echo "- 手动跑一次：$compose_cmd_text exec app npm run run-once"
   echo "- cron 日志：$ROOT_DIR/data/cron-run.log"
 
   local do_qr
